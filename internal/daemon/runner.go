@@ -121,10 +121,11 @@ func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
 	currentState.Normalize()
 
 	snapshot, err := r.Detector.Detect(ctx, ipdetect.Options{
-		PublicSources:      r.Config.Check.PublicSources,
-		IncludePublic:      r.Config.Check.IncludePublic,
-		IncludePrivate:     r.Config.Check.IncludePrivate,
-		InterfaceAllowlist: r.Config.Check.InterfaceAllowlist,
+		PublicSources:            r.Config.Check.PublicSources,
+		IncludePublic:            r.Config.Check.IncludePublic,
+		IncludePrivate:           r.Config.Check.IncludePrivate,
+		InterfaceAllowlist:       r.Config.Check.InterfaceAllowlist,
+		InterfaceExcludePrefixes: r.Config.Check.InterfaceExcludePrefixes,
 	})
 	if err != nil {
 		return ProcessResult{}, err

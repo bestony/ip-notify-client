@@ -94,6 +94,10 @@ check:
   include_public: true
   include_private: true
   interface_allowlist: []
+  interface_exclude_prefixes:
+    - docker
+    - br
+    - tailscale
 
 state:
   path: /var/lib/ip-notify/state.json
@@ -115,6 +119,8 @@ notifiers:
 Secrets are never logged. Use `debug` logging to inspect source attempts, interface scanning, and provider request metadata without credentials.
 
 Set `check.include_public: false` to skip public IP providers and monitor only local interface IP addresses. When public IP monitoring is disabled, `check.public_sources` is ignored and may be omitted. At least one of `check.include_public` or `check.include_private` must be enabled.
+
+Use `check.interface_allowlist` to monitor only specific interface names. Use `check.interface_exclude_prefixes` to skip interface names with matching prefixes, such as Docker bridges, Linux bridges, or Tailscale devices. When both are set, the allowlist is applied first and prefix exclusions are applied afterward.
 
 ## Usage
 

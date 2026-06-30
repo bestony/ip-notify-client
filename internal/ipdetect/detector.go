@@ -7,10 +7,11 @@ import (
 )
 
 type Options struct {
-	PublicSources      []string
-	IncludePublic      bool
-	IncludePrivate     bool
-	InterfaceAllowlist []string
+	PublicSources            []string
+	IncludePublic            bool
+	IncludePrivate           bool
+	InterfaceAllowlist       []string
+	InterfaceExcludePrefixes []string
 }
 
 type Detector struct {
@@ -31,7 +32,7 @@ func (d Detector) Detect(ctx context.Context, options Options) (Snapshot, error)
 		loggerOrDiscard(d.Logger).Debug("public IP collection disabled")
 	}
 
-	interfaceIPs, err := d.Interface.Collect(ctx, options.IncludePrivate, options.InterfaceAllowlist)
+	interfaceIPs, err := d.Interface.Collect(ctx, options.IncludePrivate, options.InterfaceAllowlist, options.InterfaceExcludePrefixes)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("collect interface IPs: %w", err)
 	}

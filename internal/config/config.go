@@ -19,6 +19,12 @@ var defaultPublicSources = []string{
 	"https://icanhazip.com",
 }
 
+var defaultInterfaceExcludePrefixes = []string{
+	"docker",
+	"br",
+	"tailscale",
+}
+
 type Duration struct {
 	time.Duration
 }
@@ -63,13 +69,14 @@ type LogConfig struct {
 }
 
 type CheckConfig struct {
-	Interval           Duration `yaml:"interval"`
-	Timeout            Duration `yaml:"timeout"`
-	NotifyInitial      bool     `yaml:"notify_initial"`
-	PublicSources      []string `yaml:"public_sources"`
-	IncludePublic      bool     `yaml:"include_public"`
-	IncludePrivate     bool     `yaml:"include_private"`
-	InterfaceAllowlist []string `yaml:"interface_allowlist"`
+	Interval                 Duration `yaml:"interval"`
+	Timeout                  Duration `yaml:"timeout"`
+	NotifyInitial            bool     `yaml:"notify_initial"`
+	PublicSources            []string `yaml:"public_sources"`
+	IncludePublic            bool     `yaml:"include_public"`
+	IncludePrivate           bool     `yaml:"include_private"`
+	InterfaceAllowlist       []string `yaml:"interface_allowlist"`
+	InterfaceExcludePrefixes []string `yaml:"interface_exclude_prefixes"`
 }
 
 type StateConfig struct {
@@ -102,13 +109,14 @@ func Default() Config {
 			Level: "info",
 		},
 		Check: CheckConfig{
-			Interval:           Duration{Duration: 10 * time.Minute},
-			Timeout:            Duration{Duration: 5 * time.Second},
-			NotifyInitial:      true,
-			PublicSources:      append([]string(nil), defaultPublicSources...),
-			IncludePublic:      true,
-			IncludePrivate:     true,
-			InterfaceAllowlist: []string{},
+			Interval:                 Duration{Duration: 10 * time.Minute},
+			Timeout:                  Duration{Duration: 5 * time.Second},
+			NotifyInitial:            true,
+			PublicSources:            append([]string(nil), defaultPublicSources...),
+			IncludePublic:            true,
+			IncludePrivate:           true,
+			InterfaceAllowlist:       []string{},
+			InterfaceExcludePrefixes: append([]string(nil), defaultInterfaceExcludePrefixes...),
 		},
 		State: StateConfig{
 			Path: "/var/lib/ip-notify/state.json",
@@ -158,6 +166,7 @@ func (c *Config) Normalize() {
 
 	c.Check.PublicSources = cleanStringSlice(c.Check.PublicSources)
 	c.Check.InterfaceAllowlist = cleanStringSlice(c.Check.InterfaceAllowlist)
+	c.Check.InterfaceExcludePrefixes = cleanStringSlice(c.Check.InterfaceExcludePrefixes)
 	c.Notifiers.Bark.DeviceKeys = cleanStringSlice(c.Notifiers.Bark.DeviceKeys)
 }
 

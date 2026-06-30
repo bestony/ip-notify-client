@@ -42,7 +42,7 @@ func TestInterfaceCollectorFiltersAndSortsAddresses(t *testing.T) {
 		},
 	}
 
-	results, err := collector.Collect(context.Background(), true, nil)
+	results, err := collector.Collect(context.Background(), true, nil, nil)
 	if err != nil {
 		t.Fatalf("collect interface IPs: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestInterfaceCollectorHonorsAllowlist(t *testing.T) {
 		},
 	}
 
-	results, err := collector.Collect(context.Background(), true, []string{"eth1"})
+	results, err := collector.Collect(context.Background(), true, []string{"eth1"}, nil)
 	if err != nil {
 		t.Fatalf("collect interface IPs: %v", err)
 	}
@@ -82,8 +82,73 @@ func TestInterfaceCollectorHonorsAllowlist(t *testing.T) {
 	}
 }
 
+func TestInterfaceCollectorExcludesInterfacesByPrefix(t *testing.T) {
+	collector := InterfaceCollector{
+		Interfaces: fakeInterfaces{
+			{Name: "docker0", Flags: net.FlagUp},
+			{Name: "br-1234", Flags: net.FlagUp},
+			{Name: "tailscale0", Flags: net.FlagUp},
+			{Name: "eth0", Flags: net.FlagUp},
+		},
+		Addresses: fakeAddresses{
+			"docker0":    {mustCIDR(t, "10.1.0.2/24")},
+			"br-1234":    {mustCIDR(t, "10.2.0.2/24")},
+			"tailscale0": {mustCIDR(t, "100.64.0.2/10")},
+			"eth0":       {mustCIDR(t, "192.0.2.44/24")},
+		},
+	}
+
+	results, err := collector.Collect(context.Background(), true, nil, []string{" docker ", "br", "", "tailscale"})
+	if err != nil {
+		t.Fatalf("collect interface IPs: %v", err)
+	}
+	if len(results) != 1 || results[0] != (InterfaceIP{Interface: "eth0", IP: "192.0.2.44"}) {
+		t.Fatalf("expected only eth0 address, got %#v", results)
+	}
+}
+
+func TestInterfaceCollectorAppliesExcludePrefixesAfterAllowlist(t *testing.T) {
+	collector := InterfaceCollector{
+		Interfaces: fakeInterfaces{
+			{Name: "docker0", Flags: net.FlagUp},
+			{Name: "eth0", Flags: net.FlagUp},
+		},
+		Addresses: fakeAddresses{
+			"docker0": {mustCIDR(t, "10.1.0.2/24")},
+			"eth0":    {mustCIDR(t, "192.0.2.44/24")},
+		},
+	}
+
+	results, err := collector.Collect(context.Background(), true, []string{"docker0", "eth0"}, []string{"docker"})
+	if err != nil {
+		t.Fatalf("collect interface IPs: %v", err)
+	}
+	if len(results) != 1 || results[0].Interface != "eth0" {
+		t.Fatalf("expected allowlisted eth0 and excluded docker0, got %#v", results)
+	}
+}
+
+func TestInterfaceCollectorKeepsInterfacesWithoutExcludedPrefix(t *testing.T) {
+	collector := InterfaceCollector{
+		Interfaces: fakeInterfaces{
+			{Name: "eno1", Flags: net.FlagUp},
+		},
+		Addresses: fakeAddresses{
+			"eno1": {mustCIDR(t, "192.0.2.45/24")},
+		},
+	}
+
+	results, err := collector.Collect(context.Background(), true, nil, []string{"docker", "br", "tailscale"})
+	if err != nil {
+		t.Fatalf("collect interface IPs: %v", err)
+	}
+	if len(results) != 1 || results[0] != (InterfaceIP{Interface: "eno1", IP: "192.0.2.45"}) {
+		t.Fatalf("expected eno1 address, got %#v", results)
+	}
+}
+
 func TestInterfaceCollectorDisabled(t *testing.T) {
-	results, err := InterfaceCollector{}.Collect(context.Background(), false, nil)
+	results, err := InterfaceCollector{}.Collect(context.Background(), false, nil, []string{"docker"})
 	if err != nil {
 		t.Fatalf("collect disabled interfaces: %v", err)
 	}
@@ -95,13 +160,13 @@ func TestInterfaceCollectorDisabled(t *testing.T) {
 func TestInterfaceCollectorErrors(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := (InterfaceCollector{}).Collect(cancelled, true, nil); err == nil {
+	if _, err := (InterfaceCollector{}).Collect(cancelled, true, nil, nil); err == nil {
 		t.Fatal("expected context error")
 	}
 
 	_, err := InterfaceCollector{
 		Interfaces: failingInterfaces{},
-	}.Collect(context.Background(), true, nil)
+	}.Collect(context.Background(), true, nil, nil)
 	if err == nil {
 		t.Fatal("expected interface provider error")
 	}
@@ -114,7 +179,7 @@ func TestInterfaceCollectorErrors(t *testing.T) {
 				{Name: "eth0", Flags: net.FlagUp},
 			},
 		},
-	}.Collect(ctx, true, nil)
+	}.Collect(ctx, true, nil, nil)
 	if err == nil {
 		t.Fatal("expected context error during interface loop")
 	}
@@ -140,7 +205,7 @@ func TestInterfaceCollectorSkipsAddressErrorsAndUnsupportedValues(t *testing.T) 
 		},
 	}
 
-	results, err := collector.Collect(context.Background(), true, nil)
+	results, err := collector.Collect(context.Background(), true, nil, nil)
 	if err != nil {
 		t.Fatalf("collect interface IPs: %v", err)
 	}
@@ -150,7 +215,7 @@ func TestInterfaceCollectorSkipsAddressErrorsAndUnsupportedValues(t *testing.T) 
 }
 
 func TestInterfaceCollectorDefaultProviders(t *testing.T) {
-	if _, err := (InterfaceCollector{}).Collect(context.Background(), true, []string{"definitely-missing-ip-notify-test-iface"}); err != nil {
+	if _, err := (InterfaceCollector{}).Collect(context.Background(), true, []string{"definitely-missing-ip-notify-test-iface"}, nil); err != nil {
 		t.Fatalf("collect with default providers: %v", err)
 	}
 

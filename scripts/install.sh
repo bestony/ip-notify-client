@@ -439,6 +439,10 @@ check:
   include_public: true
   include_private: true
   interface_allowlist: []
+  interface_exclude_prefixes:
+    - docker
+    - br
+    - tailscale
 
 state:
   path: ${STATE_DIR}/state.json

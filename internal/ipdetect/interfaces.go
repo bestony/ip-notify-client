@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"strings"
 )
 
 type InterfaceProvider interface {
@@ -32,7 +33,7 @@ type InterfaceCollector struct {
 	Logger     *slog.Logger
 }
 
-func (c InterfaceCollector) Collect(ctx context.Context, includePrivate bool, allowlist []string) ([]InterfaceIP, error) {
+func (c InterfaceCollector) Collect(ctx context.Context, includePrivate bool, allowlist []string, excludePrefixes []string) ([]InterfaceIP, error) {
 	if !includePrivate {
 		loggerOrDiscard(c.Logger).Debug("interface IP collection disabled")
 		return nil, nil
@@ -74,6 +75,10 @@ func (c InterfaceCollector) Collect(ctx context.Context, includePrivate bool, al
 				continue
 			}
 		}
+		if excludedByPrefix(iface.Name, excludePrefixes) {
+			logger.Debug("skipping interface matching exclude prefix", "interface", iface.Name)
+			continue
+		}
 		if iface.Flags&net.FlagUp == 0 {
 			logger.Debug("skipping interface that is down", "interface", iface.Name)
 			continue
@@ -106,6 +111,19 @@ func (c InterfaceCollector) Collect(ctx context.Context, includePrivate bool, al
 	}
 
 	return Snapshot{InterfaceIPs: results}.Normalize().InterfaceIPs, nil
+}
+
+func excludedByPrefix(interfaceName string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" {
+			continue
+		}
+		if strings.HasPrefix(interfaceName, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseInterfaceAddr(raw net.Addr) (netip.Addr, bool) {

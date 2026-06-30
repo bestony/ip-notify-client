@@ -33,6 +33,9 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Check.PublicSources) != 3 {
 		t.Fatalf("expected three public sources, got %d", len(cfg.Check.PublicSources))
 	}
+	if !reflect.DeepEqual(cfg.Check.InterfaceExcludePrefixes, []string{"docker", "br", "tailscale"}) {
+		t.Fatalf("unexpected interface exclude prefixes: %#v", cfg.Check.InterfaceExcludePrefixes)
+	}
 }
 
 func TestLoadYAMLAndValidate(t *testing.T) {
@@ -46,6 +49,9 @@ check:
   public_sources:
     - http://127.0.0.1/ip
   include_private: false
+  interface_exclude_prefixes:
+    - docker
+    - tailscale
 state:
   path: /tmp/ip-notify-state.json
 notifiers:
@@ -71,6 +77,9 @@ notifiers:
 	}
 	if !cfg.Check.IncludePublic {
 		t.Fatal("expected missing include_public field to keep default true")
+	}
+	if !reflect.DeepEqual(cfg.Check.InterfaceExcludePrefixes, []string{"docker", "tailscale"}) {
+		t.Fatalf("unexpected interface exclude prefixes: %#v", cfg.Check.InterfaceExcludePrefixes)
 	}
 	if cfg.Notifiers.Bark.ServerURL != "http://127.0.0.1:8080" {
 		t.Fatalf("unexpected Bark server URL: %q", cfg.Notifiers.Bark.ServerURL)
@@ -169,6 +178,7 @@ func TestNormalizeCleansValues(t *testing.T) {
 	cfg.Notifiers.Pushover.Device = " device "
 	cfg.Check.PublicSources = []string{" http://127.0.0.1/ip ", " "}
 	cfg.Check.InterfaceAllowlist = []string{" eth0 ", ""}
+	cfg.Check.InterfaceExcludePrefixes = []string{" docker ", "", " br "}
 
 	cfg.Normalize()
 	if cfg.Log.Level != "info" {
@@ -188,6 +198,9 @@ func TestNormalizeCleansValues(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg.Check.InterfaceAllowlist, []string{"eth0"}) {
 		t.Fatalf("unexpected allowlist: %#v", cfg.Check.InterfaceAllowlist)
+	}
+	if !reflect.DeepEqual(cfg.Check.InterfaceExcludePrefixes, []string{"docker", "br"}) {
+		t.Fatalf("unexpected interface exclude prefixes: %#v", cfg.Check.InterfaceExcludePrefixes)
 	}
 	if cfg.Notifiers.Pushover.Device != "device" {
 		t.Fatalf("unexpected pushover device: %q", cfg.Notifiers.Pushover.Device)

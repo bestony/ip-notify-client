@@ -259,6 +259,7 @@ func TestRunnerPassesDetectionOptions(t *testing.T) {
 	cfg.Check.IncludePrivate = true
 	cfg.Check.PublicSources = []string{"https://example.com/ip"}
 	cfg.Check.InterfaceAllowlist = []string{"eth0"}
+	cfg.Check.InterfaceExcludePrefixes = []string{"docker", "br"}
 	detector := &fakeDetector{
 		snapshot: ipdetect.Snapshot{
 			InterfaceIPs: []ipdetect.InterfaceIP{
@@ -287,6 +288,11 @@ func TestRunnerPassesDetectionOptions(t *testing.T) {
 	}
 	if len(detector.options.InterfaceAllowlist) != 1 || detector.options.InterfaceAllowlist[0] != "eth0" {
 		t.Fatalf("unexpected interface allowlist: %#v", detector.options.InterfaceAllowlist)
+	}
+	if len(detector.options.InterfaceExcludePrefixes) != 2 ||
+		detector.options.InterfaceExcludePrefixes[0] != "docker" ||
+		detector.options.InterfaceExcludePrefixes[1] != "br" {
+		t.Fatalf("unexpected interface exclude prefixes: %#v", detector.options.InterfaceExcludePrefixes)
 	}
 }
 

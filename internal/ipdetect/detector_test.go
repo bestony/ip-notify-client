@@ -21,18 +21,22 @@ func TestDetectorDetectsSnapshot(t *testing.T) {
 		Public: PublicResolver{Client: server.Client()},
 		Interface: InterfaceCollector{
 			Interfaces: fakeInterfaces{
+				{Name: "docker0", Flags: net.FlagUp},
 				{Name: "eth0", Flags: net.FlagUp},
 			},
 			Addresses: fakeAddresses{
-				"eth0": {mustCIDR(t, "192.0.2.44/24")},
+				"docker0": {mustCIDR(t, "10.1.0.2/24")},
+				"eth0":    {mustCIDR(t, "192.0.2.44/24")},
 			},
 		},
 	}
 
 	snapshot, err := detector.Detect(context.Background(), Options{
-		PublicSources:  []string{server.URL},
-		IncludePublic:  true,
-		IncludePrivate: true,
+		PublicSources:            []string{server.URL},
+		IncludePublic:            true,
+		IncludePrivate:           true,
+		InterfaceAllowlist:       []string{"docker0", "eth0"},
+		InterfaceExcludePrefixes: []string{"docker"},
 	})
 	if err != nil {
 		t.Fatalf("detect snapshot: %v", err)
