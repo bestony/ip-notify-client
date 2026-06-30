@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	"bestony.com/ip-notify-client/internal/ipdetect"
+	updatecmd "bestony.com/ip-notify-client/internal/update"
+	"github.com/spf13/cobra"
 )
 
 func TestOnceCommandPrintsHumanResult(t *testing.T) {
@@ -135,6 +138,92 @@ notifiers:
 	}
 }
 
+func TestUpdateCommandDryRunWiresFlagsAndPrintsPlannedLatestUpdate(t *testing.T) {
+	stubRunUpdate(t, func(cmd *cobra.Command, options updatecmd.Options) error {
+		if options.Version != "" {
+			t.Fatalf("expected latest version default, got %q", options.Version)
+		}
+		if options.InstallPath != "" {
+			t.Fatalf("expected install path default, got %q", options.InstallPath)
+		}
+		if !options.DryRun {
+			t.Fatalf("expected dry-run option")
+		}
+		if options.NoRestart {
+			t.Fatalf("did not expect no-restart option")
+		}
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "DRY-RUN: would resolve latest release from GitHub\nVersion: <latest>")
+		return err
+	})
+
+	var stdout bytes.Buffer
+	cmd := NewRootCommand()
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"update", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute update dry-run: %v", err)
+	}
+
+	output := stdout.String()
+	for _, expected := range []string{
+		"DRY-RUN: would resolve latest release from GitHub",
+		"Version: <latest>",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("output missing %q:\n%s", expected, output)
+		}
+	}
+}
+
+func TestUpdateCommandPassesExplicitVersionAndInstallPath(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "ip-notify")
+	stubRunUpdate(t, func(_ *cobra.Command, options updatecmd.Options) error {
+		if options.Version != "v9.8.7" {
+			t.Fatalf("expected version v9.8.7, got %q", options.Version)
+		}
+		if options.InstallPath != target {
+			t.Fatalf("expected install path %q, got %q", target, options.InstallPath)
+		}
+		if options.DryRun {
+			t.Fatalf("did not expect dry-run option")
+		}
+		return nil
+	})
+
+	cmd := NewRootCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"update", "--version", "v9.8.7", "--install-path", target})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute update explicit version: %v", err)
+	}
+}
+
+func TestUpdateCommandNoRestartDisablesServiceChecks(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "ip-notify")
+	stubRunUpdate(t, func(_ *cobra.Command, options updatecmd.Options) error {
+		if !options.NoRestart {
+			t.Fatalf("expected no-restart option")
+		}
+		if options.InstallPath != target {
+			t.Fatalf("expected install path %q, got %q", target, options.InstallPath)
+		}
+		return nil
+	})
+
+	cmd := NewRootCommand()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"update", "--version", "v1.2.3", "--install-path", target, "--no-restart"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute update no-restart: %v", err)
+	}
+}
+
 func writeOnceTestConfig(t *testing.T, publicIP string) (string, *httptest.Server) {
 	t.Helper()
 
@@ -182,4 +271,13 @@ notifiers:
 		t.Fatalf("write config: %v", err)
 	}
 	return configPath, server
+}
+
+func stubRunUpdate(t *testing.T, run func(*cobra.Command, updatecmd.Options) error) {
+	t.Helper()
+	previous := runUpdate
+	runUpdate = run
+	t.Cleanup(func() {
+		runUpdate = previous
+	})
 }

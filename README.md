@@ -150,6 +150,33 @@ Preview the installer actions without changing the system:
 ip-notify install-daemon --dry-run
 ```
 
+Update the installed binary from GitHub Releases:
+
+```sh
+sudo ip-notify update
+```
+
+By default, `update` installs the latest GitHub Release to the current executable path and restarts `ip-notify.service` only when the service is currently active. Root privileges may be required when replacing `/usr/local/bin/ip-notify`.
+
+Install a specific release tag:
+
+```sh
+sudo ip-notify update --version v0.1.0
+```
+
+Preview the update without downloading or changing the system:
+
+```sh
+ip-notify update --dry-run
+```
+
+Replace a custom binary path or skip service restart handling:
+
+```sh
+sudo ip-notify update --install-path /usr/local/bin/ip-notify
+sudo ip-notify update --no-restart
+```
+
 Print version information:
 
 ```sh

@@ -15,9 +15,17 @@ import (
 	"bestony.com/ip-notify-client/internal/logging"
 	"bestony.com/ip-notify-client/internal/notify"
 	"bestony.com/ip-notify-client/internal/state"
+	updatecmd "bestony.com/ip-notify-client/internal/update"
 	"bestony.com/ip-notify-client/internal/version"
 	"github.com/spf13/cobra"
 )
+
+var runUpdate = func(cmd *cobra.Command, options updatecmd.Options) error {
+	updater := updatecmd.Updater{
+		Logger: slog.Default(),
+	}
+	return updater.Update(cmd.Context(), options, cmd.OutOrStdout())
+}
 
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
@@ -30,6 +38,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newRunCommand())
 	root.AddCommand(newOnceCommand())
 	root.AddCommand(newInstallDaemonCommand())
+	root.AddCommand(newUpdateCommand())
 	root.AddCommand(newVersionCommand())
 
 	return root
@@ -112,6 +121,32 @@ func newInstallDaemonCommand() *cobra.Command {
 	cmd.Flags().StringVar(&servicePath, "service-path", install.DefaultServicePath, "systemd service unit path")
 	cmd.Flags().BoolVar(&start, "start", false, "start the service after installing")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print planned operations without changing the system")
+	return cmd
+}
+
+func newUpdateCommand() *cobra.Command {
+	var versionFlag string
+	var installPath string
+	var dryRun bool
+	var noRestart bool
+
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update ip-notify from GitHub Releases",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runUpdate(cmd, updatecmd.Options{
+				Version:     versionFlag,
+				InstallPath: installPath,
+				DryRun:      dryRun,
+				NoRestart:   noRestart,
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&versionFlag, "version", "", "release tag to install; defaults to latest")
+	cmd.Flags().StringVar(&installPath, "install-path", "", "destination path for the ip-notify binary; defaults to current executable")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print planned operations without downloading or changing the system")
+	cmd.Flags().BoolVar(&noRestart, "no-restart", false, "skip checking and restarting ip-notify.service after replacement")
 	return cmd
 }
 
