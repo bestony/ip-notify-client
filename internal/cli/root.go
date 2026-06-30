@@ -73,6 +73,7 @@ func newRunCommand() *cobra.Command {
 func newOnceCommand() *cobra.Command {
 	var configPath string
 	var jsonOutput bool
+	var forceNotify bool
 
 	cmd := &cobra.Command{
 		Use:   "once",
@@ -82,9 +83,11 @@ func newOnceCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			loggerOrDefault(runner.Logger).Info("running one ip-notify check", "config_path", configPath, "notifiers", cfg.EnabledNotifierNames())
+			loggerOrDefault(runner.Logger).Info("running one ip-notify check", "config_path", configPath, "notifiers", cfg.EnabledNotifierNames(), "force_notify", forceNotify)
 
-			result, err := runner.ProcessOnceResult(cmd.Context())
+			result, err := runner.ProcessOnceResultWithOptions(cmd.Context(), daemon.ProcessOptions{
+				ForceNotify: forceNotify,
+			})
 			if err != nil {
 				return err
 			}
@@ -94,6 +97,7 @@ func newOnceCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&configPath, "config", config.DefaultPath, "path to YAML config file")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print the result as JSON")
+	cmd.Flags().BoolVar(&forceNotify, "force", false, "send notifications even when the current IP snapshot has already been handled")
 	return cmd
 }
 

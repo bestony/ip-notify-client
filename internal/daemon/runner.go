@@ -59,6 +59,10 @@ type ProcessResult struct {
 	Notifications []NotificationResult `json:"notifications,omitempty"`
 }
 
+type ProcessOptions struct {
+	ForceNotify bool
+}
+
 func (r Runner) Run(ctx context.Context) error {
 	if r.Detector == nil {
 		return fmt.Errorf("detector is required")
@@ -103,6 +107,10 @@ func (r Runner) ProcessOnce(ctx context.Context) error {
 }
 
 func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
+	return r.ProcessOnceResultWithOptions(ctx, ProcessOptions{})
+}
+
+func (r Runner) ProcessOnceResultWithOptions(ctx context.Context, options ProcessOptions) (ProcessResult, error) {
 	if r.Detector == nil {
 		return ProcessResult{}, fmt.Errorf("detector is required")
 	}
@@ -173,7 +181,7 @@ func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
 	}
 	for _, notifier := range r.Notifiers {
 		name := notifier.Name()
-		if !currentState.NeedsNotification(name, hash) {
+		if currentState.NotifierTerminalFailures[name] == hash {
 			logger.Debug("notifier already handled current snapshot", "notifier", name, "hash", hash)
 			result.Notifications = append(result.Notifications, NotificationResult{
 				Notifier: name,
@@ -181,6 +189,18 @@ func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
 				Reason:   "already_handled",
 			})
 			continue
+		}
+		if currentState.NotifierHashes[name] == hash {
+			if !options.ForceNotify {
+				logger.Debug("notifier already handled current snapshot", "notifier", name, "hash", hash)
+				result.Notifications = append(result.Notifications, NotificationResult{
+					Notifier: name,
+					Status:   NotificationStatusSkipped,
+					Reason:   "already_handled",
+				})
+				continue
+			}
+			logger.Info("force notifying provider for current snapshot", "notifier", name, "hash", hash)
 		}
 
 		logger.Debug("notifying provider", "notifier", name, "hash", hash)

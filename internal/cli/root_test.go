@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"bestony.com/ip-notify-client/internal/config"
@@ -75,6 +76,47 @@ func TestOnceCommandPrintsJSONResult(t *testing.T) {
 	}
 	if !result.Changed {
 		t.Fatalf("expected changed=true in JSON")
+	}
+}
+
+func TestOnceCommandForceNotifiesAlreadyHandledSnapshot(t *testing.T) {
+	configPath, pushCount := writeCountingOnceTestConfig(t, "203.0.113.6")
+
+	first := NewRootCommand()
+	first.SetOut(&bytes.Buffer{})
+	first.SetErr(&bytes.Buffer{})
+	first.SetArgs([]string{"once", "--config", configPath})
+	if err := first.Execute(); err != nil {
+		t.Fatalf("execute first once: %v", err)
+	}
+	if got := pushCount.Load(); got != 1 {
+		t.Fatalf("expected first push, got %d", got)
+	}
+
+	var stdout bytes.Buffer
+	second := NewRootCommand()
+	second.SetOut(&stdout)
+	second.SetErr(&bytes.Buffer{})
+	second.SetArgs([]string{"once", "--force", "--json", "--config", configPath})
+	if err := second.Execute(); err != nil {
+		t.Fatalf("execute forced once: %v", err)
+	}
+	if got := pushCount.Load(); got != 2 {
+		t.Fatalf("expected forced push, got %d", got)
+	}
+
+	var result struct {
+		Changed  bool `json:"changed"`
+		Notified bool `json:"notified"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("decode json output %q: %v", stdout.String(), err)
+	}
+	if result.Changed {
+		t.Fatalf("expected changed=false in JSON")
+	}
+	if !result.Notified {
+		t.Fatalf("expected notified=true in JSON")
 	}
 }
 
@@ -470,6 +512,57 @@ notifiers:
 		t.Fatalf("write config: %v", err)
 	}
 	return configPath, server
+}
+
+func writeCountingOnceTestConfig(t *testing.T, publicIP string) (string, *atomic.Int64) {
+	t.Helper()
+
+	var pushCount atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/ip":
+			_, _ = writer.Write([]byte(publicIP))
+		case "/push":
+			pushCount.Add(1)
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"code":200,"message":"success"}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	statePath := filepath.Join(dir, "state.json")
+	data := []byte(`log:
+  level: error
+check:
+  interval: 10m
+  timeout: 5s
+  notify_initial: true
+  public_sources:
+    - ` + server.URL + `/ip
+  include_private: false
+state:
+  path: ` + statePath + `
+notifiers:
+  bark:
+    enabled: true
+    server_url: ` + server.URL + `
+    device_keys:
+      - test-device
+    group: ip-notify
+  pushover:
+    enabled: false
+    token: ""
+    user: ""
+    device: ""
+`)
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return configPath, &pushCount
 }
 
 func stubRunUpdate(t *testing.T, run func(*cobra.Command, updatecmd.Options) error) {

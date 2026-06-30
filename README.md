@@ -137,7 +137,10 @@ Run one production check and exit:
 ```sh
 ip-notify once --config /etc/ip-notify/config.yaml
 ip-notify once --json --config /etc/ip-notify/config.yaml
+ip-notify once --force --config /etc/ip-notify/config.yaml
 ```
+
+Use `once --force` to send notifications even when the current IP snapshot hash has already been handled by the configured notifier.
 
 Install as a systemd service:
 
