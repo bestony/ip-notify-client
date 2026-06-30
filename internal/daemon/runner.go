@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"bestony.com/ip-notify-client/internal/config"
@@ -33,11 +35,14 @@ type Runner struct {
 type NotificationStatus string
 
 const (
+	defaultNotificationTitle                              = "IP address changed"
 	NotificationStatusDelivered        NotificationStatus = "delivered"
 	NotificationStatusFailed           NotificationStatus = "failed"
 	NotificationStatusPermanentFailure NotificationStatus = "permanent_failure"
 	NotificationStatusSkipped          NotificationStatus = "skipped"
 )
+
+var systemHostname = os.Hostname
 
 type NotificationResult struct {
 	Notifier  string             `json:"notifier"`
@@ -117,6 +122,7 @@ func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
 
 	snapshot, err := r.Detector.Detect(ctx, ipdetect.Options{
 		PublicSources:      r.Config.Check.PublicSources,
+		IncludePublic:      r.Config.Check.IncludePublic,
 		IncludePrivate:     r.Config.Check.IncludePrivate,
 		InterfaceAllowlist: r.Config.Check.InterfaceAllowlist,
 	})
@@ -158,7 +164,7 @@ func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
 	}
 
 	message := notify.Message{
-		Title: "IP address changed",
+		Title: notificationTitle(),
 		Body:  snapshot.Body(),
 	}
 	for _, notifier := range r.Notifiers {
@@ -236,4 +242,16 @@ func saveState(store StateStore, state state.State) error {
 		return fmt.Errorf("save state: %w", err)
 	}
 	return nil
+}
+
+func notificationTitle() string {
+	hostname, err := systemHostname()
+	if err != nil {
+		return defaultNotificationTitle
+	}
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return defaultNotificationTitle
+	}
+	return fmt.Sprintf("%s %s", hostname, defaultNotificationTitle)
 }

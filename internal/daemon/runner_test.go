@@ -53,18 +53,62 @@ func (s *memoryStore) Save(next state.State) error {
 }
 
 type fakeNotifier struct {
-	name  string
-	err   error
-	calls int
+	name     string
+	err      error
+	calls    int
+	messages []notify.Message
 }
 
 func (n *fakeNotifier) Name() string {
 	return n.name
 }
 
-func (n *fakeNotifier) Notify(context.Context, notify.Message) error {
+func (n *fakeNotifier) Notify(_ context.Context, message notify.Message) error {
 	n.calls++
+	n.messages = append(n.messages, message)
 	return n.err
+}
+
+func TestNotificationTitleIncludesHostname(t *testing.T) {
+	originalHostname := systemHostname
+	systemHostname = func() (string, error) {
+		return "test-host", nil
+	}
+	t.Cleanup(func() {
+		systemHostname = originalHostname
+	})
+
+	if got := notificationTitle(); got != "test-host IP address changed" {
+		t.Fatalf("expected hostname title, got %q", got)
+	}
+}
+
+func TestNotificationTitleFallsBackForEmptyHostname(t *testing.T) {
+	originalHostname := systemHostname
+	systemHostname = func() (string, error) {
+		return " \t\n ", nil
+	}
+	t.Cleanup(func() {
+		systemHostname = originalHostname
+	})
+
+	if got := notificationTitle(); got != "IP address changed" {
+		t.Fatalf("expected fallback title, got %q", got)
+	}
+}
+
+func TestNotificationTitleFallsBackForHostnameError(t *testing.T) {
+	originalHostname := systemHostname
+	systemHostname = func() (string, error) {
+		return "", errors.New("hostname unavailable")
+	}
+	t.Cleanup(func() {
+		systemHostname = originalHostname
+	})
+
+	if got := notificationTitle(); got != "IP address changed" {
+		t.Fatalf("expected fallback title, got %q", got)
+	}
 }
 
 func TestRunnerRetriesOnlyFailedProvider(t *testing.T) {
@@ -156,6 +200,13 @@ func TestRunnerHonorsNotifyInitialFalse(t *testing.T) {
 }
 
 func TestRunnerProcessOnceResultReportsSnapshotHashAndChanged(t *testing.T) {
+	originalHostname := systemHostname
+	systemHostname = func() (string, error) {
+		return "daemon-host", nil
+	}
+	t.Cleanup(func() {
+		systemHostname = originalHostname
+	})
 	cfg := config.Default()
 	cfg.Check.NotifyInitial = true
 	snapshot := ipdetect.Snapshot{
@@ -194,6 +245,9 @@ func TestRunnerProcessOnceResultReportsSnapshotHashAndChanged(t *testing.T) {
 	}
 	if len(result.Notifications) != 1 || result.Notifications[0].Status != NotificationStatusDelivered {
 		t.Fatalf("expected delivered notification, got %#v", result.Notifications)
+	}
+	if len(notifier.messages) != 1 || notifier.messages[0].Title != "daemon-host IP address changed" {
+		t.Fatalf("expected hostname title, got %#v", notifier.messages)
 	}
 }
 
