@@ -67,6 +67,7 @@ type CheckConfig struct {
 	Timeout            Duration `yaml:"timeout"`
 	NotifyInitial      bool     `yaml:"notify_initial"`
 	PublicSources      []string `yaml:"public_sources"`
+	IncludePublic      bool     `yaml:"include_public"`
 	IncludePrivate     bool     `yaml:"include_private"`
 	InterfaceAllowlist []string `yaml:"interface_allowlist"`
 }
@@ -105,6 +106,7 @@ func Default() Config {
 			Timeout:            Duration{Duration: 5 * time.Second},
 			NotifyInitial:      true,
 			PublicSources:      append([]string(nil), defaultPublicSources...),
+			IncludePublic:      true,
 			IncludePrivate:     true,
 			InterfaceAllowlist: []string{},
 		},
@@ -171,12 +173,17 @@ func (c Config) Validate() error {
 	if c.Check.Timeout.Duration <= 0 {
 		problems = append(problems, "check.timeout must be greater than 0")
 	}
-	if len(c.Check.PublicSources) == 0 {
-		problems = append(problems, "check.public_sources must contain at least one HTTP source")
+	if !c.Check.IncludePublic && !c.Check.IncludePrivate {
+		problems = append(problems, "at least one IP source must be enabled")
 	}
-	for _, source := range c.Check.PublicSources {
-		if err := validateHTTPURL(source); err != nil {
-			problems = append(problems, fmt.Sprintf("check.public_sources contains invalid URL %q: %v", source, err))
+	if c.Check.IncludePublic {
+		if len(c.Check.PublicSources) == 0 {
+			problems = append(problems, "check.public_sources must contain at least one HTTP source")
+		}
+		for _, source := range c.Check.PublicSources {
+			if err := validateHTTPURL(source); err != nil {
+				problems = append(problems, fmt.Sprintf("check.public_sources contains invalid URL %q: %v", source, err))
+			}
 		}
 	}
 	if c.State.Path == "" {

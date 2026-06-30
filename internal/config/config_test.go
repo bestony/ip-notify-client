@@ -27,6 +27,9 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.Check.NotifyInitial {
 		t.Fatal("expected notify_initial to default true")
 	}
+	if !cfg.Check.IncludePublic {
+		t.Fatal("expected include_public to default true")
+	}
 	if len(cfg.Check.PublicSources) != 3 {
 		t.Fatalf("expected three public sources, got %d", len(cfg.Check.PublicSources))
 	}
@@ -65,6 +68,9 @@ notifiers:
 	}
 	if cfg.Check.Interval.Duration != time.Minute {
 		t.Fatalf("expected interval 1m, got %s", cfg.Check.Interval)
+	}
+	if !cfg.Check.IncludePublic {
+		t.Fatal("expected missing include_public field to keep default true")
 	}
 	if cfg.Notifiers.Bark.ServerURL != "http://127.0.0.1:8080" {
 		t.Fatalf("unexpected Bark server URL: %q", cfg.Notifiers.Bark.ServerURL)
@@ -206,6 +212,7 @@ func TestValidateReportsAllFailures(t *testing.T) {
 			Interval:      Duration{Duration: 0},
 			Timeout:       Duration{Duration: -time.Second},
 			PublicSources: []string{"", "ftp://example.com/ip", "http://"},
+			IncludePublic: true,
 		},
 		Notifiers: NotifiersConfig{
 			Bark: BarkConfig{
@@ -241,6 +248,25 @@ func TestValidateReportsAllFailures(t *testing.T) {
 	}
 }
 
+func TestValidateAllowsDisabledPublicSources(t *testing.T) {
+	cfg := Default()
+	cfg.Check.IncludePublic = false
+	cfg.Check.IncludePrivate = true
+	cfg.Check.PublicSources = nil
+	cfg.State.Path = "/tmp/state.json"
+	cfg.Notifiers.Bark.Enabled = true
+	cfg.Notifiers.Bark.DeviceKeys = []string{"key"}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate private-only config without public sources: %v", err)
+	}
+
+	cfg.Check.PublicSources = []string{"://ignored"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate private-only config with ignored public sources: %v", err)
+	}
+}
+
 func TestValidateRequiresPublicSources(t *testing.T) {
 	cfg := Default()
 	cfg.Check.PublicSources = nil
@@ -253,6 +279,23 @@ func TestValidateRequiresPublicSources(t *testing.T) {
 		t.Fatal("expected public source validation error")
 	}
 	if !strings.Contains(err.Error(), "check.public_sources must contain at least one HTTP source") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateRequiresAtLeastOneIPSource(t *testing.T) {
+	cfg := Default()
+	cfg.Check.IncludePublic = false
+	cfg.Check.IncludePrivate = false
+	cfg.State.Path = "/tmp/state.json"
+	cfg.Notifiers.Bark.Enabled = true
+	cfg.Notifiers.Bark.DeviceKeys = []string{"key"}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected IP source validation error")
+	}
+	if !strings.Contains(err.Error(), "at least one IP source must be enabled") {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }

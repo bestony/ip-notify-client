@@ -91,6 +91,7 @@ check:
     - https://api.ipify.org
     - https://ifconfig.me/ip
     - https://icanhazip.com
+  include_public: true
   include_private: true
   interface_allowlist: []
 
@@ -112,6 +113,8 @@ notifiers:
 ```
 
 Secrets are never logged. Use `debug` logging to inspect source attempts, interface scanning, and provider request metadata without credentials.
+
+Set `check.include_public: false` to skip public IP providers and monitor only local interface IP addresses. When public IP monitoring is disabled, `check.public_sources` is ignored and may be omitted. At least one of `check.include_public` or `check.include_private` must be enabled.
 
 ## Usage
 

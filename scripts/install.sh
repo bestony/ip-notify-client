@@ -436,6 +436,7 @@ check:
     - https://api.ipify.org
     - https://ifconfig.me/ip
     - https://icanhazip.com
+  include_public: true
   include_private: true
   interface_allowlist: []
 

@@ -16,11 +16,13 @@ type fakeDetector struct {
 	snapshot ipdetect.Snapshot
 	err      error
 	calls    int
+	options  ipdetect.Options
 	onDetect func()
 }
 
-func (f *fakeDetector) Detect(context.Context, ipdetect.Options) (ipdetect.Snapshot, error) {
+func (f *fakeDetector) Detect(_ context.Context, options ipdetect.Options) (ipdetect.Snapshot, error) {
 	f.calls++
+	f.options = options
 	if f.onDetect != nil {
 		f.onDetect()
 	}
@@ -248,6 +250,43 @@ func TestRunnerProcessOnceResultReportsSnapshotHashAndChanged(t *testing.T) {
 	}
 	if len(notifier.messages) != 1 || notifier.messages[0].Title != "daemon-host IP address changed" {
 		t.Fatalf("expected hostname title, got %#v", notifier.messages)
+	}
+}
+
+func TestRunnerPassesDetectionOptions(t *testing.T) {
+	cfg := config.Default()
+	cfg.Check.IncludePublic = false
+	cfg.Check.IncludePrivate = true
+	cfg.Check.PublicSources = []string{"https://example.com/ip"}
+	cfg.Check.InterfaceAllowlist = []string{"eth0"}
+	detector := &fakeDetector{
+		snapshot: ipdetect.Snapshot{
+			InterfaceIPs: []ipdetect.InterfaceIP{
+				{Interface: "eth0", IP: "192.0.2.10"},
+			},
+		},
+	}
+
+	if _, err := (Runner{
+		Config:   cfg,
+		Detector: detector,
+		Store:    &memoryStore{state: state.NewState()},
+		Now:      func() time.Time { return time.Unix(100, 0).UTC() },
+	}).ProcessOnceResult(context.Background()); err != nil {
+		t.Fatalf("process result: %v", err)
+	}
+
+	if detector.options.IncludePublic {
+		t.Fatalf("expected IncludePublic=false to be passed to detector: %#v", detector.options)
+	}
+	if !detector.options.IncludePrivate {
+		t.Fatalf("expected IncludePrivate=true to be passed to detector: %#v", detector.options)
+	}
+	if len(detector.options.PublicSources) != 1 || detector.options.PublicSources[0] != "https://example.com/ip" {
+		t.Fatalf("unexpected public sources: %#v", detector.options.PublicSources)
+	}
+	if len(detector.options.InterfaceAllowlist) != 1 || detector.options.InterfaceAllowlist[0] != "eth0" {
+		t.Fatalf("unexpected interface allowlist: %#v", detector.options.InterfaceAllowlist)
 	}
 }
 

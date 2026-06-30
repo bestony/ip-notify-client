@@ -8,6 +8,7 @@ import (
 
 type Options struct {
 	PublicSources      []string
+	IncludePublic      bool
 	IncludePrivate     bool
 	InterfaceAllowlist []string
 }
@@ -19,9 +20,15 @@ type Detector struct {
 }
 
 func (d Detector) Detect(ctx context.Context, options Options) (Snapshot, error) {
-	publicIP, err := d.Public.Resolve(ctx, options.PublicSources)
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("resolve public IP: %w", err)
+	var publicIP string
+	if options.IncludePublic {
+		var err error
+		publicIP, err = d.Public.Resolve(ctx, options.PublicSources)
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("resolve public IP: %w", err)
+		}
+	} else {
+		loggerOrDiscard(d.Logger).Debug("public IP collection disabled")
 	}
 
 	interfaceIPs, err := d.Interface.Collect(ctx, options.IncludePrivate, options.InterfaceAllowlist)
