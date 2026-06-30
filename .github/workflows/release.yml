@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build release artifacts
+        env:
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          build_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          package_root="dist/packages"
+          mkdir -p "${package_root}"
+
+          build_one() {
+            local goarch="$1"
+            local staging_dir="${package_root}/ip-notify_${TAG}_linux_${goarch}"
+            local binary_path="${staging_dir}/ip-notify"
+
+            mkdir -p "${staging_dir}"
+            CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" go build \
+              -trimpath \
+              -ldflags "-X bestony.com/ip-notify-client/internal/version.Version=${TAG} -X bestony.com/ip-notify-client/internal/version.Commit=${COMMIT} -X bestony.com/ip-notify-client/internal/version.Date=${build_date}" \
+              -o "${binary_path}" \
+              ./cmd/ip-notify
+
+            cp README.md "${staging_dir}/README.md"
+            mkdir -p "${staging_dir}/configs"
+            cp configs/config.example.yaml "${staging_dir}/configs/config.example.yaml"
+
+            tar -C "${staging_dir}" -czf "dist/ip-notify_${TAG}_linux_${goarch}.tar.gz" .
+          }
+
+          build_one amd64
+          build_one arm64
+
+          cd dist
+          artifacts=( "ip-notify_${TAG}_linux_"*.tar.gz )
+          sha256sum "${artifacts[@]}" > SHA256SUMS
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          artifacts=( "dist/ip-notify_${TAG}_linux_"*.tar.gz dist/SHA256SUMS )
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${artifacts[@]}" --clobber
+          else
+            gh release create "${TAG}" \
+              "${artifacts[@]}" \
+              --verify-tag \
+              --title "${TAG}" \
+              --generate-notes
+          fi
