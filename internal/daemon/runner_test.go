@@ -139,6 +139,94 @@ func TestRunnerHonorsNotifyInitialFalse(t *testing.T) {
 	}
 }
 
+func TestRunnerProcessOnceResultReportsSnapshotHashAndChanged(t *testing.T) {
+	cfg := config.Default()
+	cfg.Check.NotifyInitial = true
+	snapshot := ipdetect.Snapshot{
+		PublicIP: "203.0.113.4",
+		InterfaceIPs: []ipdetect.InterfaceIP{
+			{Interface: "eth0", IP: "192.0.2.10"},
+		},
+	}
+	notifier := &fakeNotifier{name: "bark"}
+	runner := Runner{
+		Config: cfg,
+		Detector: fakeDetector{
+			snapshot: snapshot,
+		},
+		Store:     &memoryStore{state: state.NewState()},
+		Notifiers: []notify.Notifier{notifier},
+		Now:       func() time.Time { return time.Unix(100, 0).UTC() },
+	}
+
+	result, err := runner.ProcessOnceResult(context.Background())
+	if err != nil {
+		t.Fatalf("process result: %v", err)
+	}
+	expectedHash, err := snapshot.Hash()
+	if err != nil {
+		t.Fatalf("hash snapshot: %v", err)
+	}
+	if result.Hash != expectedHash {
+		t.Fatalf("expected hash %q, got %q", expectedHash, result.Hash)
+	}
+	if !result.Changed {
+		t.Fatalf("expected changed=true")
+	}
+	if result.Snapshot.PublicIP != "203.0.113.4" {
+		t.Fatalf("expected snapshot public IP, got %#v", result.Snapshot)
+	}
+	if !result.Notified {
+		t.Fatalf("expected notified=true")
+	}
+	if len(result.Notifications) != 1 || result.Notifications[0].Status != NotificationStatusDelivered {
+		t.Fatalf("expected delivered notification, got %#v", result.Notifications)
+	}
+}
+
+func TestRunnerProcessOnceResultReportsUnchangedSnapshot(t *testing.T) {
+	cfg := config.Default()
+	cfg.Check.NotifyInitial = true
+	snapshot := ipdetect.Snapshot{PublicIP: "203.0.113.4"}
+	hash, err := snapshot.Hash()
+	if err != nil {
+		t.Fatalf("hash snapshot: %v", err)
+	}
+	notifier := &fakeNotifier{name: "bark"}
+	runner := Runner{
+		Config: cfg,
+		Detector: fakeDetector{
+			snapshot: snapshot,
+		},
+		Store: &memoryStore{state: state.State{
+			CurrentHash:     hash,
+			CurrentSnapshot: snapshot,
+			NotifierHashes: map[string]string{
+				"bark": hash,
+			},
+		}},
+		Notifiers: []notify.Notifier{notifier},
+		Now:       func() time.Time { return time.Unix(100, 0).UTC() },
+	}
+
+	result, err := runner.ProcessOnceResult(context.Background())
+	if err != nil {
+		t.Fatalf("process result: %v", err)
+	}
+	if result.Changed {
+		t.Fatalf("expected changed=false")
+	}
+	if result.Notified {
+		t.Fatalf("expected notified=false")
+	}
+	if notifier.calls != 0 {
+		t.Fatalf("expected notifier not to be called, got %d", notifier.calls)
+	}
+	if len(result.Notifications) != 1 || result.Notifications[0].Status != NotificationStatusSkipped {
+		t.Fatalf("expected skipped notification, got %#v", result.Notifications)
+	}
+}
+
 func TestRunnerDoesNotCheckWhenContextAlreadyCancelled(t *testing.T) {
 	cfg := config.Default()
 	detector := fakeDetector{

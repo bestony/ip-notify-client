@@ -30,6 +30,30 @@ type Runner struct {
 	Now       func() time.Time
 }
 
+type NotificationStatus string
+
+const (
+	NotificationStatusDelivered        NotificationStatus = "delivered"
+	NotificationStatusFailed           NotificationStatus = "failed"
+	NotificationStatusPermanentFailure NotificationStatus = "permanent_failure"
+	NotificationStatusSkipped          NotificationStatus = "skipped"
+)
+
+type NotificationResult struct {
+	Notifier  string             `json:"notifier"`
+	Status    NotificationStatus `json:"status"`
+	Reason    string             `json:"reason,omitempty"`
+	Permanent bool               `json:"permanent,omitempty"`
+}
+
+type ProcessResult struct {
+	Snapshot      ipdetect.Snapshot    `json:"snapshot"`
+	Hash          string               `json:"hash"`
+	Changed       bool                 `json:"changed"`
+	Notified      bool                 `json:"notified"`
+	Notifications []NotificationResult `json:"notifications,omitempty"`
+}
+
 func (r Runner) Run(ctx context.Context) error {
 	if r.Detector == nil {
 		return fmt.Errorf("detector is required")
@@ -69,11 +93,16 @@ func (r Runner) Run(ctx context.Context) error {
 }
 
 func (r Runner) ProcessOnce(ctx context.Context) error {
+	_, err := r.ProcessOnceResult(ctx)
+	return err
+}
+
+func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
 	if r.Detector == nil {
-		return fmt.Errorf("detector is required")
+		return ProcessResult{}, fmt.Errorf("detector is required")
 	}
 	if r.Store == nil {
-		return fmt.Errorf("state store is required")
+		return ProcessResult{}, fmt.Errorf("state store is required")
 	}
 	if r.Now == nil {
 		r.Now = time.Now
@@ -82,7 +111,7 @@ func (r Runner) ProcessOnce(ctx context.Context) error {
 	logger := loggerOrDiscard(r.Logger)
 	currentState, err := r.Store.Load()
 	if err != nil {
-		return fmt.Errorf("load state: %w", err)
+		return ProcessResult{}, fmt.Errorf("load state: %w", err)
 	}
 	currentState.Normalize()
 
@@ -92,17 +121,22 @@ func (r Runner) ProcessOnce(ctx context.Context) error {
 		InterfaceAllowlist: r.Config.Check.InterfaceAllowlist,
 	})
 	if err != nil {
-		return err
+		return ProcessResult{}, err
 	}
 
 	hash, err := snapshot.Hash()
 	if err != nil {
-		return err
+		return ProcessResult{}, err
 	}
 
 	hadSnapshot := currentState.CurrentHash != ""
 	previousHash := currentState.CurrentHash
 	changed := currentState.RecordSnapshot(snapshot, hash, r.Now())
+	result := ProcessResult{
+		Snapshot: snapshot.Normalize(),
+		Hash:     hash,
+		Changed:  changed,
+	}
 	if changed {
 		logger.Info("IP snapshot changed",
 			"previous_hash", previousHash,
@@ -117,11 +151,13 @@ func (r Runner) ProcessOnce(ctx context.Context) error {
 	if !hadSnapshot && !r.Config.Check.NotifyInitial {
 		currentState.MarkInitialSkipped(hash)
 		logger.Info("initial IP snapshot recorded without notification", "hash", hash)
-		return r.Store.Save(currentState)
+		result.Notifications = skippedNotifications(r.Notifiers, "initial_notification_disabled")
+		return result, saveState(r.Store, currentState)
 	}
 	if currentState.InitialSkippedHash == hash {
 		logger.Debug("snapshot notification skipped because initial notification is disabled", "hash", hash)
-		return r.Store.Save(currentState)
+		result.Notifications = skippedNotifications(r.Notifiers, "initial_notification_disabled")
+		return result, saveState(r.Store, currentState)
 	}
 
 	message := notify.Message{
@@ -132,6 +168,11 @@ func (r Runner) ProcessOnce(ctx context.Context) error {
 		name := notifier.Name()
 		if !currentState.NeedsNotification(name, hash) {
 			logger.Debug("notifier already handled current snapshot", "notifier", name, "hash", hash)
+			result.Notifications = append(result.Notifications, NotificationResult{
+				Notifier: name,
+				Status:   NotificationStatusSkipped,
+				Reason:   "already_handled",
+			})
 			continue
 		}
 
@@ -144,6 +185,11 @@ func (r Runner) ProcessOnce(ctx context.Context) error {
 					"hash", hash,
 					"error", err,
 				)
+				result.Notifications = append(result.Notifications, NotificationResult{
+					Notifier:  name,
+					Status:    NotificationStatusPermanentFailure,
+					Permanent: true,
+				})
 				continue
 			}
 			logger.Warn("provider delivery failed; will retry on next interval",
@@ -151,21 +197,46 @@ func (r Runner) ProcessOnce(ctx context.Context) error {
 				"hash", hash,
 				"error", err,
 			)
+			result.Notifications = append(result.Notifications, NotificationResult{
+				Notifier: name,
+				Status:   NotificationStatusFailed,
+			})
 			continue
 		}
 
 		currentState.MarkNotifierSuccess(name, hash)
+		result.Notified = true
+		result.Notifications = append(result.Notifications, NotificationResult{
+			Notifier: name,
+			Status:   NotificationStatusDelivered,
+		})
 		logger.Info("notification delivered", "notifier", name, "hash", hash)
 	}
 
-	if err := r.Store.Save(currentState); err != nil {
-		return fmt.Errorf("save state: %w", err)
-	}
-	return nil
+	return result, saveState(r.Store, currentState)
 }
 
 func (r Runner) runCheck(ctx context.Context) {
 	if err := r.ProcessOnce(ctx); err != nil {
 		loggerOrDiscard(r.Logger).Warn("IP check failed", "error", err)
 	}
+}
+
+func skippedNotifications(notifiers []notify.Notifier, reason string) []NotificationResult {
+	results := make([]NotificationResult, 0, len(notifiers))
+	for _, notifier := range notifiers {
+		results = append(results, NotificationResult{
+			Notifier: notifier.Name(),
+			Status:   NotificationStatusSkipped,
+			Reason:   reason,
+		})
+	}
+	return results
+}
+
+func saveState(store StateStore, state state.State) error {
+	if err := store.Save(state); err != nil {
+		return fmt.Errorf("save state: %w", err)
+	}
+	return nil
 }

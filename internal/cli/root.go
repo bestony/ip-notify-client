@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,6 +28,7 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	root.AddCommand(newRunCommand())
+	root.AddCommand(newOnceCommand())
 	root.AddCommand(newInstallDaemonCommand())
 	root.AddCommand(newVersionCommand())
 
@@ -39,44 +42,43 @@ func newRunCommand() *cobra.Command {
 		Use:   "run",
 		Short: "Run the IP notification daemon",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(configPath)
+			runner, cfg, err := newRunner(configPath)
 			if err != nil {
 				return err
 			}
-			if err := cfg.Validate(); err != nil {
-				return fmt.Errorf("invalid config: %w", err)
-			}
-
-			logger, err := logging.New(cfg.Log.Level)
-			if err != nil {
-				return err
-			}
-			logger.Info("starting ip-notify", "config_path", configPath, "notifiers", cfg.EnabledNotifierNames())
-
-			client := &http.Client{Timeout: cfg.Check.Timeout.Duration}
-			detector := ipdetect.Detector{
-				Public: ipdetect.PublicResolver{
-					Client: client,
-					Logger: logger,
-				},
-				Interface: ipdetect.InterfaceCollector{
-					Logger: logger,
-				},
-				Logger: logger,
-			}
-
-			runner := daemon.Runner{
-				Config:    cfg,
-				Detector:  detector,
-				Store:     state.New(cfg.State.Path),
-				Notifiers: buildNotifiers(cfg, client, logger),
-				Logger:    logger,
-			}
+			loggerOrDefault(runner.Logger).Info("starting ip-notify", "config_path", configPath, "notifiers", cfg.EnabledNotifierNames())
 			return runner.Run(cmd.Context())
 		},
 	}
 
 	cmd.Flags().StringVar(&configPath, "config", config.DefaultPath, "path to YAML config file")
+	return cmd
+}
+
+func newOnceCommand() *cobra.Command {
+	var configPath string
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:   "once",
+		Short: "Run one IP check and exit",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			runner, cfg, err := newRunner(configPath)
+			if err != nil {
+				return err
+			}
+			loggerOrDefault(runner.Logger).Info("running one ip-notify check", "config_path", configPath, "notifiers", cfg.EnabledNotifierNames())
+
+			result, err := runner.ProcessOnceResult(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return writeProcessResult(cmd.OutOrStdout(), result, jsonOutput)
+		},
+	}
+
+	cmd.Flags().StringVar(&configPath, "config", config.DefaultPath, "path to YAML config file")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print the result as JSON")
 	return cmd
 }
 
@@ -142,6 +144,59 @@ func buildNotifiers(cfg config.Config, client *http.Client, logger *slog.Logger)
 		}, client, logger))
 	}
 	return notifiers
+}
+
+func newRunner(configPath string) (daemon.Runner, config.Config, error) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return daemon.Runner{}, config.Config{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return daemon.Runner{}, config.Config{}, fmt.Errorf("invalid config: %w", err)
+	}
+
+	logger, err := logging.New(cfg.Log.Level)
+	if err != nil {
+		return daemon.Runner{}, config.Config{}, err
+	}
+
+	client := &http.Client{Timeout: cfg.Check.Timeout.Duration}
+	detector := ipdetect.Detector{
+		Public: ipdetect.PublicResolver{
+			Client: client,
+			Logger: logger,
+		},
+		Interface: ipdetect.InterfaceCollector{
+			Logger: logger,
+		},
+		Logger: logger,
+	}
+
+	return daemon.Runner{
+		Config:    cfg,
+		Detector:  detector,
+		Store:     state.New(cfg.State.Path),
+		Notifiers: buildNotifiers(cfg, client, logger),
+		Logger:    logger,
+	}, cfg, nil
+}
+
+func writeProcessResult(writer io.Writer, result daemon.ProcessResult, jsonOutput bool) error {
+	if jsonOutput {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+
+	_, err := fmt.Fprintf(writer, "%s\nSnapshot Hash: %s\nChanged: %t\n", result.Snapshot.Body(), result.Hash, result.Changed)
+	return err
+}
+
+func loggerOrDefault(logger *slog.Logger) *slog.Logger {
+	if logger != nil {
+		return logger
+	}
+	return slog.Default()
 }
 
 func Execute() error {

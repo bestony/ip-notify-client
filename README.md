@@ -67,6 +67,13 @@ Run the daemon in the foreground:
 ip-notify run --config /etc/ip-notify/config.yaml
 ```
 
+Run one production check and exit:
+
+```sh
+ip-notify once --config /etc/ip-notify/config.yaml
+ip-notify once --json --config /etc/ip-notify/config.yaml
+```
+
 Install as a systemd service:
 
 ```sh
