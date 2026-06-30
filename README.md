@@ -15,7 +15,9 @@ go build -o ip-notify ./cmd/ip-notify
 
 ## Configuration
 
-The default config path is `/etc/ip-notify/config.yaml`. Start from:
+The default config path is `/etc/ip-notify/config.yaml`. `install-daemon` creates a default config at that path if it does not already exist.
+
+For manual setup, start from:
 
 ```sh
 cp configs/config.example.yaml /etc/ip-notify/config.yaml
@@ -71,7 +73,9 @@ Install as a systemd service:
 sudo ip-notify install-daemon --config /etc/ip-notify/config.yaml
 ```
 
-The installer copies the current executable to `/usr/local/bin/ip-notify`, creates an `ip-notify` system user and group, creates `/etc/ip-notify` and `/var/lib/ip-notify`, writes `/etc/systemd/system/ip-notify.service`, reloads systemd, and enables the service.
+The installer copies the current executable to `/usr/local/bin/ip-notify`, creates an `ip-notify` system user and group, creates `/etc/ip-notify` and `/var/lib/ip-notify`, writes a default config to `/etc/ip-notify/config.yaml` when the file is missing, writes `/etc/systemd/system/ip-notify.service`, reloads systemd, and enables the service.
+
+The generated config does not enable Bark or Pushover and does not include credentials. Edit `/etc/ip-notify/config.yaml` to enable at least one notifier before starting or restarting the service.
 
 It does not start the service unless `--start` is passed:
 

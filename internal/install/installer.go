@@ -18,6 +18,7 @@ const (
 	DefaultStateDir    = "/var/lib/ip-notify"
 	DefaultUser        = "ip-notify"
 	DefaultGroup       = "ip-notify"
+	defaultConfigMode  = 0o640
 )
 
 type Options struct {
@@ -169,6 +170,23 @@ func (i Installer) Plan(options Options) ([]Operation, error) {
 			Description: fmt.Sprintf("set ownership root:%s on %s", options.Group, options.ConfigDir),
 			run: func(ctx context.Context) error {
 				return runner.Run(ctx, "chown", "root:"+options.Group, options.ConfigDir)
+			},
+		},
+		{
+			Description: fmt.Sprintf("write default config %s if missing; skip existing file", options.ConfigPath),
+			run: func(ctx context.Context) error {
+				created, err := writeDefaultConfigIfMissing(options.ConfigPath, defaultConfigMode)
+				if err != nil {
+					return err
+				}
+				if !created {
+					return nil
+				}
+				if err := runner.Run(ctx, "chown", "root:"+options.Group, options.ConfigPath); err != nil {
+					_ = os.Remove(options.ConfigPath)
+					return fmt.Errorf("set default config ownership: %w", err)
+				}
+				return nil
 			},
 		},
 		{
