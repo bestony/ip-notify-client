@@ -3,7 +3,6 @@ package install
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 )
 
@@ -39,7 +38,7 @@ notifiers:
 `
 
 func writeDefaultConfigIfMissing(path string, mode os.FileMode) (bool, error) {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	file, err := osOpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if errors.Is(err, os.ErrExist) {
 		return false, nil
 	}
@@ -51,19 +50,19 @@ func writeDefaultConfigIfMissing(path string, mode os.FileMode) (bool, error) {
 	removeOnError := true
 	defer func() {
 		if removeOnError {
-			_ = os.Remove(path)
+			_ = osRemove(path)
 		}
 	}()
 
-	if _, err := io.WriteString(file, defaultConfigYAML); err != nil {
-		_ = file.Close()
+	if _, err := writeString(file, defaultConfigYAML); err != nil {
+		_ = closeFile(file)
 		return created, fmt.Errorf("write default config: %w", err)
 	}
-	if err := file.Chmod(mode); err != nil {
-		_ = file.Close()
+	if err := chmodFile(file, mode); err != nil {
+		_ = closeFile(file)
 		return created, fmt.Errorf("chmod default config: %w", err)
 	}
-	if err := file.Close(); err != nil {
+	if err := closeFile(file); err != nil {
 		return created, fmt.Errorf("close default config: %w", err)
 	}
 

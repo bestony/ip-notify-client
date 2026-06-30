@@ -51,6 +51,21 @@ type Installer struct {
 
 type ExecRunner struct{}
 
+var (
+	osExecutable = os.Executable
+	osMkdirAll   = os.MkdirAll
+	osWriteFile  = os.WriteFile
+	osOpen       = os.Open
+	osOpenFile   = os.OpenFile
+	osCreateTemp = os.CreateTemp
+	osRemove     = os.Remove
+	osRename     = os.Rename
+	copyStream   = io.Copy
+	writeString  = io.WriteString
+	chmodFile    = func(file *os.File, mode os.FileMode) error { return file.Chmod(mode) }
+	closeFile    = func(file *os.File) error { return file.Close() }
+)
+
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	output, err := cmd.CombinedOutput()
@@ -61,7 +76,7 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
 }
 
 func DefaultOptions(configPath string) (Options, error) {
-	executable, err := os.Executable()
+	executable, err := osExecutable()
 	if err != nil {
 		return Options{}, fmt.Errorf("resolve current executable: %w", err)
 	}
@@ -112,16 +127,13 @@ func (i Installer) Plan(options Options) ([]Operation, error) {
 		return nil, errors.New("binary path is required")
 	}
 
-	unit, err := RenderUnit(UnitOptions{
+	unit := RenderUnit(UnitOptions{
 		BinaryPath: options.InstallPath,
 		ConfigPath: options.ConfigPath,
 		User:       options.User,
 		Group:      options.Group,
 		StateDir:   options.StateDir,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("render systemd unit: %w", err)
-	}
 
 	runner := i.Runner
 	if runner == nil {
@@ -163,7 +175,7 @@ func (i Installer) Plan(options Options) ([]Operation, error) {
 		{
 			Description: fmt.Sprintf("create config directory %s", options.ConfigDir),
 			run: func(context.Context) error {
-				return os.MkdirAll(options.ConfigDir, 0o750)
+				return osMkdirAll(options.ConfigDir, 0o750)
 			},
 		},
 		{
@@ -183,7 +195,7 @@ func (i Installer) Plan(options Options) ([]Operation, error) {
 					return nil
 				}
 				if err := runner.Run(ctx, "chown", "root:"+options.Group, options.ConfigPath); err != nil {
-					_ = os.Remove(options.ConfigPath)
+					_ = osRemove(options.ConfigPath)
 					return fmt.Errorf("set default config ownership: %w", err)
 				}
 				return nil
@@ -192,7 +204,7 @@ func (i Installer) Plan(options Options) ([]Operation, error) {
 		{
 			Description: fmt.Sprintf("create state directory %s", options.StateDir),
 			run: func(context.Context) error {
-				return os.MkdirAll(options.StateDir, 0o750)
+				return osMkdirAll(options.StateDir, 0o750)
 			},
 		},
 		{
@@ -204,7 +216,7 @@ func (i Installer) Plan(options Options) ([]Operation, error) {
 		{
 			Description: fmt.Sprintf("write systemd unit %s", options.ServicePath),
 			run: func(context.Context) error {
-				return os.WriteFile(options.ServicePath, []byte(unit), 0o644)
+				return osWriteFile(options.ServicePath, []byte(unit), 0o644)
 			},
 		},
 		{
@@ -267,37 +279,37 @@ func (i Installer) Install(ctx context.Context, options Options, writer io.Write
 }
 
 func copyFile(source, destination string, mode os.FileMode) error {
-	input, err := os.Open(source)
+	input, err := osOpen(source)
 	if err != nil {
 		return fmt.Errorf("open source binary: %w", err)
 	}
 	defer input.Close()
 
-	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+	if err := osMkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return fmt.Errorf("create destination directory: %w", err)
 	}
 
-	temp, err := os.CreateTemp(filepath.Dir(destination), ".ip-notify-*")
+	temp, err := osCreateTemp(filepath.Dir(destination), ".ip-notify-*")
 	if err != nil {
 		return fmt.Errorf("create temp destination: %w", err)
 	}
 	tempName := temp.Name()
 	defer func() {
-		_ = os.Remove(tempName)
+		_ = osRemove(tempName)
 	}()
 
-	if _, err := io.Copy(temp, input); err != nil {
-		_ = temp.Close()
+	if _, err := copyStream(temp, input); err != nil {
+		_ = closeFile(temp)
 		return fmt.Errorf("copy binary: %w", err)
 	}
-	if err := temp.Chmod(mode); err != nil {
-		_ = temp.Close()
+	if err := chmodFile(temp, mode); err != nil {
+		_ = closeFile(temp)
 		return fmt.Errorf("chmod binary: %w", err)
 	}
-	if err := temp.Close(); err != nil {
+	if err := closeFile(temp); err != nil {
 		return fmt.Errorf("close copied binary: %w", err)
 	}
-	if err := os.Rename(tempName, destination); err != nil {
+	if err := osRename(tempName, destination); err != nil {
 		return fmt.Errorf("replace destination binary: %w", err)
 	}
 	return nil

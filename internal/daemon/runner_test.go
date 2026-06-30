@@ -15,24 +15,40 @@ import (
 type fakeDetector struct {
 	snapshot ipdetect.Snapshot
 	err      error
+	calls    int
+	onDetect func()
 }
 
-func (f fakeDetector) Detect(context.Context, ipdetect.Options) (ipdetect.Snapshot, error) {
+func (f *fakeDetector) Detect(context.Context, ipdetect.Options) (ipdetect.Snapshot, error) {
+	f.calls++
+	if f.onDetect != nil {
+		f.onDetect()
+	}
 	return f.snapshot, f.err
 }
 
 type memoryStore struct {
-	state state.State
+	state   state.State
+	loadErr error
+	saveErr error
+	saves   int
 }
 
 func (s *memoryStore) Load() (state.State, error) {
+	if s.loadErr != nil {
+		return state.State{}, s.loadErr
+	}
 	s.state.Normalize()
 	return s.state, nil
 }
 
 func (s *memoryStore) Save(next state.State) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
 	next.Normalize()
 	s.state = next
+	s.saves++
 	return nil
 }
 
@@ -59,7 +75,7 @@ func TestRunnerRetriesOnlyFailedProvider(t *testing.T) {
 	pushover := &fakeNotifier{name: "pushover", err: errors.New("network")}
 	runner := Runner{
 		Config: cfg,
-		Detector: fakeDetector{
+		Detector: &fakeDetector{
 			snapshot: ipdetect.Snapshot{PublicIP: "203.0.113.4"},
 		},
 		Store:     store,
@@ -98,7 +114,7 @@ func TestRunnerSuppressesPermanentProviderFailure(t *testing.T) {
 	}
 	runner := Runner{
 		Config: cfg,
-		Detector: fakeDetector{
+		Detector: &fakeDetector{
 			snapshot: ipdetect.Snapshot{PublicIP: "203.0.113.4"},
 		},
 		Store:     store,
@@ -123,7 +139,7 @@ func TestRunnerHonorsNotifyInitialFalse(t *testing.T) {
 	notifier := &fakeNotifier{name: "bark"}
 	runner := Runner{
 		Config: cfg,
-		Detector: fakeDetector{
+		Detector: &fakeDetector{
 			snapshot: ipdetect.Snapshot{PublicIP: "203.0.113.4"},
 		},
 		Store:     &memoryStore{state: state.NewState()},
@@ -151,7 +167,7 @@ func TestRunnerProcessOnceResultReportsSnapshotHashAndChanged(t *testing.T) {
 	notifier := &fakeNotifier{name: "bark"}
 	runner := Runner{
 		Config: cfg,
-		Detector: fakeDetector{
+		Detector: &fakeDetector{
 			snapshot: snapshot,
 		},
 		Store:     &memoryStore{state: state.NewState()},
@@ -163,10 +179,7 @@ func TestRunnerProcessOnceResultReportsSnapshotHashAndChanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("process result: %v", err)
 	}
-	expectedHash, err := snapshot.Hash()
-	if err != nil {
-		t.Fatalf("hash snapshot: %v", err)
-	}
+	expectedHash := snapshot.Hash()
 	if result.Hash != expectedHash {
 		t.Fatalf("expected hash %q, got %q", expectedHash, result.Hash)
 	}
@@ -188,14 +201,11 @@ func TestRunnerProcessOnceResultReportsUnchangedSnapshot(t *testing.T) {
 	cfg := config.Default()
 	cfg.Check.NotifyInitial = true
 	snapshot := ipdetect.Snapshot{PublicIP: "203.0.113.4"}
-	hash, err := snapshot.Hash()
-	if err != nil {
-		t.Fatalf("hash snapshot: %v", err)
-	}
+	hash := snapshot.Hash()
 	notifier := &fakeNotifier{name: "bark"}
 	runner := Runner{
 		Config: cfg,
-		Detector: fakeDetector{
+		Detector: &fakeDetector{
 			snapshot: snapshot,
 		},
 		Store: &memoryStore{state: state.State{
@@ -229,7 +239,7 @@ func TestRunnerProcessOnceResultReportsUnchangedSnapshot(t *testing.T) {
 
 func TestRunnerDoesNotCheckWhenContextAlreadyCancelled(t *testing.T) {
 	cfg := config.Default()
-	detector := fakeDetector{
+	detector := &fakeDetector{
 		err: errors.New("should not be called"),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -243,5 +253,149 @@ func TestRunnerDoesNotCheckWhenContextAlreadyCancelled(t *testing.T) {
 	}.Run(ctx)
 	if err != nil {
 		t.Fatalf("run with cancelled context: %v", err)
+	}
+}
+
+func TestRunnerRunValidationErrors(t *testing.T) {
+	cfg := config.Default()
+	if err := (Runner{Config: cfg, Store: &memoryStore{}}).Run(context.Background()); err == nil {
+		t.Fatal("expected missing detector error")
+	}
+	if err := (Runner{Config: cfg, Detector: &fakeDetector{}}).Run(context.Background()); err == nil {
+		t.Fatal("expected missing store error")
+	}
+}
+
+func TestRunnerRunLoopChecksUntilCancelled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Check.Interval = config.Duration{Duration: time.Millisecond}
+	ctx, cancel := context.WithCancel(context.Background())
+	detector := &fakeDetector{
+		snapshot: ipdetect.Snapshot{PublicIP: "203.0.113.9"},
+		onDetect: func() {
+			cancel()
+		},
+	}
+
+	err := Runner{
+		Config:   cfg,
+		Detector: detector,
+		Store:    &memoryStore{state: state.NewState()},
+	}.Run(ctx)
+	if err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+	if detector.calls == 0 {
+		t.Fatal("expected at least one check")
+	}
+}
+
+func TestRunnerRunLoopHandlesTickerCheck(t *testing.T) {
+	cfg := config.Default()
+	cfg.Check.Interval = config.Duration{Duration: time.Millisecond}
+	ctx, cancel := context.WithCancel(context.Background())
+	detector := &fakeDetector{
+		snapshot: ipdetect.Snapshot{PublicIP: "203.0.113.10"},
+	}
+	detector.onDetect = func() {
+		if detector.calls >= 2 {
+			cancel()
+		}
+	}
+
+	err := Runner{
+		Config:   cfg,
+		Detector: detector,
+		Store:    &memoryStore{state: state.NewState()},
+	}.Run(ctx)
+	if err != nil {
+		t.Fatalf("run loop: %v", err)
+	}
+	if detector.calls < 2 {
+		t.Fatalf("expected ticker check, got %d calls", detector.calls)
+	}
+}
+
+func TestRunnerProcessOnceValidationAndDependencyErrors(t *testing.T) {
+	cfg := config.Default()
+	if _, err := (Runner{Config: cfg, Store: &memoryStore{}}).ProcessOnceResult(context.Background()); err == nil {
+		t.Fatal("expected missing detector error")
+	}
+	if _, err := (Runner{Config: cfg, Detector: &fakeDetector{}}).ProcessOnceResult(context.Background()); err == nil {
+		t.Fatal("expected missing store error")
+	}
+	if _, err := (Runner{
+		Config:   cfg,
+		Detector: &fakeDetector{},
+		Store:    &memoryStore{loadErr: errors.New("load failed")},
+	}).ProcessOnceResult(context.Background()); err == nil {
+		t.Fatal("expected load error")
+	}
+	if _, err := (Runner{
+		Config:   cfg,
+		Detector: &fakeDetector{err: errors.New("detect failed")},
+		Store:    &memoryStore{state: state.NewState()},
+	}).ProcessOnceResult(context.Background()); err == nil {
+		t.Fatal("expected detect error")
+	}
+}
+
+func TestRunnerKeepsSkippingInitialHash(t *testing.T) {
+	cfg := config.Default()
+	cfg.Check.NotifyInitial = false
+	snapshot := ipdetect.Snapshot{PublicIP: "203.0.113.4"}
+	hash := snapshot.Hash()
+	store := &memoryStore{state: state.State{
+		CurrentHash:        hash,
+		CurrentSnapshot:    snapshot,
+		InitialSkippedHash: hash,
+	}}
+	notifier := &fakeNotifier{name: "bark"}
+	result, err := (Runner{
+		Config:    cfg,
+		Detector:  &fakeDetector{snapshot: snapshot},
+		Store:     store,
+		Notifiers: []notify.Notifier{notifier},
+	}).ProcessOnceResult(context.Background())
+	if err != nil {
+		t.Fatalf("process skipped initial hash: %v", err)
+	}
+	if notifier.calls != 0 {
+		t.Fatalf("expected notifier skipped, got %d calls", notifier.calls)
+	}
+	if len(result.Notifications) != 1 || result.Notifications[0].Reason != "initial_notification_disabled" {
+		t.Fatalf("unexpected notifications: %#v", result.Notifications)
+	}
+}
+
+func TestRunnerSaveStateError(t *testing.T) {
+	cfg := config.Default()
+	_, err := (Runner{
+		Config:   cfg,
+		Detector: &fakeDetector{snapshot: ipdetect.Snapshot{PublicIP: "203.0.113.4"}},
+		Store:    &memoryStore{state: state.NewState(), saveErr: errors.New("save failed")},
+	}).ProcessOnceResult(context.Background())
+	if err == nil {
+		t.Fatal("expected save error")
+	}
+	if !errors.Is(err, errors.New("save failed")) && err.Error() != "save state: save failed" {
+		t.Fatalf("unexpected save error: %v", err)
+	}
+}
+
+func TestRunCheckLogsProcessError(t *testing.T) {
+	Runner{
+		Detector: &fakeDetector{err: errors.New("detect failed")},
+		Store:    &memoryStore{state: state.NewState()},
+	}.runCheck(context.Background())
+}
+
+func TestLoggerOrDiscard(t *testing.T) {
+	logger := loggerOrDiscard(nil)
+	if logger == nil {
+		t.Fatal("expected fallback logger")
+	}
+	if got := loggerOrDiscard(logger); got != logger {
+		t.Fatal("expected existing logger")
 	}
 }

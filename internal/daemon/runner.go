@@ -124,10 +124,7 @@ func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
 		return ProcessResult{}, err
 	}
 
-	hash, err := snapshot.Hash()
-	if err != nil {
-		return ProcessResult{}, err
-	}
+	hash := snapshot.Hash()
 
 	hadSnapshot := currentState.CurrentHash != ""
 	previousHash := currentState.CurrentHash

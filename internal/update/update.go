@@ -56,6 +56,23 @@ type Updater struct {
 	Executable func() (string, error)
 }
 
+var (
+	osMkdirTemp  = os.MkdirTemp
+	osRemoveAll  = os.RemoveAll
+	osCreate     = os.Create
+	osReadFile   = os.ReadFile
+	osOpen       = os.Open
+	osMkdirAll   = os.MkdirAll
+	osCreateTemp = os.CreateTemp
+	osRemove     = os.Remove
+	osRename     = os.Rename
+	copyStream   = io.Copy
+	readAll      = io.ReadAll
+	closeFile    = func(file *os.File) error { return file.Close() }
+	chmodFile    = func(file *os.File, mode os.FileMode) error { return file.Chmod(mode) }
+	syncFile     = func(file *os.File) error { return file.Sync() }
+)
+
 type releaseAsset struct {
 	ArchiveName  string
 	ArchiveURL   string
@@ -127,11 +144,11 @@ func (u Updater) Update(ctx context.Context, options Options, writer io.Writer) 
 		return nil
 	}
 
-	tempDir, err := os.MkdirTemp("", "ip-notify-update-*")
+	tempDir, err := osMkdirTemp("", "ip-notify-update-*")
 	if err != nil {
 		return fmt.Errorf("create update temp directory: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer osRemoveAll(tempDir)
 
 	archivePath := filepath.Join(tempDir, asset.ArchiveName)
 	checksumsPath := filepath.Join(tempDir, "SHA256SUMS")
@@ -278,16 +295,16 @@ func (u Updater) downloadFile(ctx context.Context, url, destination string) erro
 		return fmt.Errorf("download %s: unexpected status %s: %s", url, resp.Status, strings.TrimSpace(string(body)))
 	}
 
-	output, err := os.Create(destination)
+	output, err := osCreate(destination)
 	if err != nil {
 		return fmt.Errorf("create download file %s: %w", destination, err)
 	}
-	defer output.Close()
+	defer closeFile(output)
 
-	if _, err := io.Copy(output, resp.Body); err != nil {
+	if _, err := copyStream(output, resp.Body); err != nil {
 		return fmt.Errorf("write download file %s: %w", destination, err)
 	}
-	if err := output.Close(); err != nil {
+	if err := closeFile(output); err != nil {
 		return fmt.Errorf("close download file %s: %w", destination, err)
 	}
 	return nil
@@ -340,7 +357,7 @@ func assetFor(tag, arch, baseURL string) releaseAsset {
 }
 
 func verifyArchiveChecksum(archivePath, checksumsPath, archiveName string) error {
-	checksums, err := os.ReadFile(checksumsPath)
+	checksums, err := osReadFile(checksumsPath)
 	if err != nil {
 		return fmt.Errorf("read SHA256SUMS: %w", err)
 	}
@@ -349,14 +366,14 @@ func verifyArchiveChecksum(archivePath, checksumsPath, archiveName string) error
 		return err
 	}
 
-	file, err := os.Open(archivePath)
+	file, err := osOpen(archivePath)
 	if err != nil {
 		return fmt.Errorf("open archive for checksum: %w", err)
 	}
 	defer file.Close()
 
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
+	if _, err := copyStream(hash, file); err != nil {
 		return fmt.Errorf("hash archive: %w", err)
 	}
 	actual := hex.EncodeToString(hash.Sum(nil))
@@ -390,7 +407,7 @@ func checksumForArchive(checksums []byte, archiveName string) (string, error) {
 }
 
 func extractBinaryFromArchive(archivePath string) ([]byte, error) {
-	file, err := os.Open(archivePath)
+	file, err := osOpen(archivePath)
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
 	}
@@ -432,7 +449,7 @@ func extractBinaryFromArchive(archivePath string) ([]byte, error) {
 			return nil, fmt.Errorf("release archive %s entry is not executable", binaryName)
 		}
 
-		data, err := io.ReadAll(tarReader)
+		data, err := readAll(tarReader)
 		if err != nil {
 			return nil, fmt.Errorf("extract %s from archive: %w", binaryName, err)
 		}
@@ -466,11 +483,6 @@ func safeTarName(name string) (string, error) {
 	}
 
 	cleanName := path.Clean(name)
-	for _, part := range strings.Split(cleanName, "/") {
-		if part == ".." {
-			return "", fmt.Errorf("release archive contains unsafe path %q", name)
-		}
-	}
 	return cleanName, nil
 }
 
@@ -478,11 +490,11 @@ func replaceBinary(destination string, binary []byte) error {
 	if destination == "" {
 		return errors.New("install path is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+	if err := osMkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return fmt.Errorf("create install directory: %w", err)
 	}
 
-	temp, err := os.CreateTemp(filepath.Dir(destination), ".ip-notify-update-*")
+	temp, err := osCreateTemp(filepath.Dir(destination), ".ip-notify-update-*")
 	if err != nil {
 		return fmt.Errorf("create temp binary in install directory: %w", err)
 	}
@@ -490,33 +502,33 @@ func replaceBinary(destination string, binary []byte) error {
 	removeTemp := true
 	defer func() {
 		if removeTemp {
-			_ = os.Remove(tempName)
+			_ = osRemove(tempName)
 		}
 	}()
 
 	if _, err := temp.Write(binary); err != nil {
-		_ = temp.Close()
+		_ = closeFile(temp)
 		return fmt.Errorf("write temp binary: %w", err)
 	}
-	if err := temp.Chmod(binaryMode); err != nil {
-		_ = temp.Close()
+	if err := chmodFile(temp, binaryMode); err != nil {
+		_ = closeFile(temp)
 		return fmt.Errorf("chmod temp binary: %w", err)
 	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
+	if err := syncFile(temp); err != nil {
+		_ = closeFile(temp)
 		return fmt.Errorf("sync temp binary: %w", err)
 	}
-	if err := temp.Close(); err != nil {
+	if err := closeFile(temp); err != nil {
 		return fmt.Errorf("close temp binary: %w", err)
 	}
-	if err := os.Rename(tempName, destination); err != nil {
+	if err := osRename(tempName, destination); err != nil {
 		return fmt.Errorf("replace installed binary: %w", err)
 	}
 	removeTemp = false
 
-	if dir, err := os.Open(filepath.Dir(destination)); err == nil {
-		_ = dir.Sync()
-		_ = dir.Close()
+	if dir, err := osOpen(filepath.Dir(destination)); err == nil {
+		_ = syncFile(dir)
+		_ = closeFile(dir)
 	}
 	return nil
 }

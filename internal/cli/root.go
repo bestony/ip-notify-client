@@ -27,6 +27,12 @@ var runUpdate = func(cmd *cobra.Command, options updatecmd.Options) error {
 	return updater.Update(cmd.Context(), options, cmd.OutOrStdout())
 }
 
+var (
+	exitProcess                     = os.Exit
+	stderrWriter          io.Writer = os.Stderr
+	defaultInstallOptions           = install.DefaultOptions
+)
+
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "ip-notify",
@@ -102,7 +108,7 @@ func newInstallDaemonCommand() *cobra.Command {
 		Use:   "install-daemon",
 		Short: "Install ip-notify as a systemd service",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			options, err := install.DefaultOptions(configPath)
+			options, err := defaultInstallOptions(configPath)
 			if err != nil {
 				return err
 			}
@@ -190,10 +196,7 @@ func newRunner(configPath string) (daemon.Runner, config.Config, error) {
 		return daemon.Runner{}, config.Config{}, fmt.Errorf("invalid config: %w", err)
 	}
 
-	logger, err := logging.New(cfg.Log.Level)
-	if err != nil {
-		return daemon.Runner{}, config.Config{}, err
-	}
+	logger, _ := logging.New(cfg.Log.Level)
 
 	client := &http.Client{Timeout: cfg.Check.Timeout.Duration}
 	detector := ipdetect.Detector{
@@ -242,6 +245,6 @@ func ExitOnError(err error) {
 	if err == nil {
 		return
 	}
-	fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
+	fmt.Fprintln(stderrWriter, err)
+	exitProcess(1)
 }

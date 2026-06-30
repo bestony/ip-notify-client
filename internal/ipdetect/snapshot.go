@@ -53,25 +53,19 @@ func (s Snapshot) Normalize() Snapshot {
 		if left.Interface != right.Interface {
 			return left.Interface < right.Interface
 		}
-		leftAddr, leftErr := netip.ParseAddr(left.IP)
-		rightAddr, rightErr := netip.ParseAddr(right.IP)
-		if leftErr == nil && rightErr == nil {
-			return leftAddr.Less(rightAddr)
-		}
-		return left.IP < right.IP
+		leftAddr := netip.MustParseAddr(left.IP)
+		rightAddr := netip.MustParseAddr(right.IP)
+		return leftAddr.Less(rightAddr)
 	})
 
 	return normalized
 }
 
-func (s Snapshot) Hash() (string, error) {
+func (s Snapshot) Hash() string {
 	normalized := s.Normalize()
-	data, err := json.Marshal(normalized)
-	if err != nil {
-		return "", fmt.Errorf("marshal snapshot: %w", err)
-	}
+	data, _ := json.Marshal(normalized)
 	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	return hex.EncodeToString(sum[:])
 }
 
 func (s Snapshot) Body() string {

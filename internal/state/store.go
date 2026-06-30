@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -24,6 +25,21 @@ type State struct {
 type Store struct {
 	Path string
 }
+
+type tempFile interface {
+	io.Writer
+	Chmod(os.FileMode) error
+	Close() error
+	Name() string
+}
+
+var (
+	stateReadFile   = os.ReadFile
+	stateMkdirAll   = os.MkdirAll
+	stateCreateTemp = func(dir, pattern string) (tempFile, error) { return os.CreateTemp(dir, pattern) }
+	stateRemove     = os.Remove
+	stateRename     = os.Rename
+)
 
 func New(path string) Store {
 	return Store{Path: path}
@@ -93,7 +109,7 @@ func (s Store) Load() (State, error) {
 		return State{}, errors.New("state path is required")
 	}
 
-	data, err := os.ReadFile(s.Path)
+	data, err := stateReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
 		return NewState(), nil
 	}
@@ -116,23 +132,20 @@ func (s Store) Save(state State) error {
 	state.Normalize()
 
 	dir := filepath.Dir(s.Path)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := stateMkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create state directory %q: %w", dir, err)
 	}
 
-	data, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode state: %w", err)
-	}
+	data, _ := json.MarshalIndent(state, "", "  ")
 	data = append(data, '\n')
 
-	temp, err := os.CreateTemp(dir, ".state-*.tmp")
+	temp, err := stateCreateTemp(dir, ".state-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp state file: %w", err)
 	}
 	tempName := temp.Name()
 	defer func() {
-		_ = os.Remove(tempName)
+		_ = stateRemove(tempName)
 	}()
 
 	if _, err := temp.Write(data); err != nil {
@@ -147,7 +160,7 @@ func (s Store) Save(state State) error {
 		return fmt.Errorf("close temp state file: %w", err)
 	}
 
-	if err := os.Rename(tempName, s.Path); err != nil {
+	if err := stateRename(tempName, s.Path); err != nil {
 		return fmt.Errorf("replace state file %q: %w", s.Path, err)
 	}
 	return nil

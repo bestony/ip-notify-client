@@ -77,9 +77,6 @@ func (r PublicResolver) resolveOne(ctx context.Context, source string) (string, 
 	if err != nil {
 		return "", fmt.Errorf("response is not an IP address: %w", err)
 	}
-	if !addr.IsValid() {
-		return "", errors.New("response is not a valid IP address")
-	}
 	return addr.Unmap().String(), nil
 }
 

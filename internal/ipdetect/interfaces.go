@@ -91,7 +91,7 @@ func (c InterfaceCollector) Collect(ctx context.Context, includePrivate bool, al
 		for _, rawAddr := range addrs {
 			addr, ok := parseInterfaceAddr(rawAddr)
 			if !ok {
-				logger.Debug("skipping unsupported interface address", "interface", iface.Name, "address", rawAddr.String())
+				logger.Debug("skipping unsupported interface address", "interface", iface.Name, "address", interfaceAddrString(rawAddr))
 				continue
 			}
 			if !isUsableInterfaceAddr(addr) {
@@ -119,6 +119,13 @@ func parseInterfaceAddr(raw net.Addr) (netip.Addr, bool) {
 		return addr.Unmap(), true
 	}
 	return netip.Addr{}, false
+}
+
+func interfaceAddrString(raw net.Addr) string {
+	if raw == nil {
+		return "<nil>"
+	}
+	return raw.String()
 }
 
 func isUsableInterfaceAddr(addr netip.Addr) bool {

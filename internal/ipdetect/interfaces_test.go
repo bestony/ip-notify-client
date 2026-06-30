@@ -2,6 +2,7 @@ package ipdetect
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 )
@@ -81,6 +82,97 @@ func TestInterfaceCollectorHonorsAllowlist(t *testing.T) {
 	}
 }
 
+func TestInterfaceCollectorDisabled(t *testing.T) {
+	results, err := InterfaceCollector{}.Collect(context.Background(), false, nil)
+	if err != nil {
+		t.Fatalf("collect disabled interfaces: %v", err)
+	}
+	if results != nil {
+		t.Fatalf("expected nil results when disabled, got %#v", results)
+	}
+}
+
+func TestInterfaceCollectorErrors(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := (InterfaceCollector{}).Collect(cancelled, true, nil); err == nil {
+		t.Fatal("expected context error")
+	}
+
+	_, err := InterfaceCollector{
+		Interfaces: failingInterfaces{},
+	}.Collect(context.Background(), true, nil)
+	if err == nil {
+		t.Fatal("expected interface provider error")
+	}
+
+	ctx, cancelDuringLoop := context.WithCancel(context.Background())
+	_, err = InterfaceCollector{
+		Interfaces: cancelingInterfaces{
+			cancel: cancelDuringLoop,
+			interfaces: []net.Interface{
+				{Name: "eth0", Flags: net.FlagUp},
+			},
+		},
+	}.Collect(ctx, true, nil)
+	if err == nil {
+		t.Fatal("expected context error during interface loop")
+	}
+}
+
+func TestInterfaceCollectorSkipsAddressErrorsAndUnsupportedValues(t *testing.T) {
+	collector := InterfaceCollector{
+		Interfaces: fakeInterfaces{
+			{Name: "eth0", Flags: net.FlagUp},
+			{Name: "eth1", Flags: net.FlagUp},
+		},
+		Addresses: mixedAddresses{
+			values: map[string][]net.Addr{
+				"eth1": {
+					nil,
+					stringAddr("not an address"),
+					stringAddr("192.0.2.20"),
+				},
+			},
+			errors: map[string]error{
+				"eth0": errors.New("address failed"),
+			},
+		},
+	}
+
+	results, err := collector.Collect(context.Background(), true, nil)
+	if err != nil {
+		t.Fatalf("collect interface IPs: %v", err)
+	}
+	if len(results) != 1 || results[0] != (InterfaceIP{Interface: "eth1", IP: "192.0.2.20"}) {
+		t.Fatalf("expected one parsed string address, got %#v", results)
+	}
+}
+
+func TestInterfaceCollectorDefaultProviders(t *testing.T) {
+	if _, err := (InterfaceCollector{}).Collect(context.Background(), true, []string{"definitely-missing-ip-notify-test-iface"}); err != nil {
+		t.Fatalf("collect with default providers: %v", err)
+	}
+
+	if _, err := (NetProvider{}).Interfaces(); err != nil {
+		t.Fatalf("list interfaces through net provider: %v", err)
+	}
+	_, _ = NetProvider{}.Addrs(net.Interface{Name: "definitely-missing-ip-notify-test-iface"})
+}
+
+func TestParseInterfaceAddr(t *testing.T) {
+	if _, ok := parseInterfaceAddr(nil); ok {
+		t.Fatal("nil address should not parse")
+	}
+	addr, ok := parseInterfaceAddr(stringAddr("192.0.2.30"))
+	if !ok || addr.String() != "192.0.2.30" {
+		t.Fatalf("expected plain IP address, got %s ok=%t", addr, ok)
+	}
+	if _, ok := parseInterfaceAddr(stringAddr("not an address")); ok {
+		t.Fatal("invalid address should not parse")
+	}
+}
+
 func mustCIDR(t *testing.T, cidr string) net.Addr {
 	t.Helper()
 	ip, network, err := net.ParseCIDR(cidr)
@@ -89,4 +181,42 @@ func mustCIDR(t *testing.T, cidr string) net.Addr {
 	}
 	network.IP = ip
 	return network
+}
+
+type failingInterfaces struct{}
+
+func (failingInterfaces) Interfaces() ([]net.Interface, error) {
+	return nil, errors.New("interfaces failed")
+}
+
+type cancelingInterfaces struct {
+	cancel     context.CancelFunc
+	interfaces []net.Interface
+}
+
+func (c cancelingInterfaces) Interfaces() ([]net.Interface, error) {
+	c.cancel()
+	return c.interfaces, nil
+}
+
+type mixedAddresses struct {
+	values map[string][]net.Addr
+	errors map[string]error
+}
+
+func (m mixedAddresses) Addrs(iface net.Interface) ([]net.Addr, error) {
+	if err := m.errors[iface.Name]; err != nil {
+		return nil, err
+	}
+	return m.values[iface.Name], nil
+}
+
+type stringAddr string
+
+func (a stringAddr) Network() string {
+	return "test"
+}
+
+func (a stringAddr) String() string {
+	return string(a)
 }

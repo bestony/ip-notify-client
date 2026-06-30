@@ -8,11 +8,17 @@ import (
 	"bestony.com/ip-notify-client/internal/cli"
 )
 
+var (
+	notifyContext  = signal.NotifyContext
+	newRootCommand = cli.NewRootCommand
+	exitOnError    = cli.ExitOnError
+)
+
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := notifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	root := cli.NewRootCommand()
+	root := newRootCommand()
 	root.SetContext(ctx)
-	cli.ExitOnError(root.Execute())
+	exitOnError(root.Execute())
 }

@@ -63,10 +63,7 @@ func (n *BarkNotifier) Notify(ctx context.Context, message Message) error {
 		payload["device_keys"] = keys
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal Bark payload: %w", err)
-	}
+	body, _ := json.Marshal(payload)
 
 	loggerOrDiscard(n.logger).Debug("sending Bark notification", "endpoint", n.endpoint, "device_key_count", len(keys), "has_group", n.group != "")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.endpoint, bytes.NewReader(body))

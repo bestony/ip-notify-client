@@ -35,10 +35,7 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 			return nil
 		}
 
-		var raw string
-		if err := value.Decode(&raw); err != nil {
-			return err
-		}
+		raw := value.Value
 		parsed, err := time.ParseDuration(raw)
 		if err != nil {
 			return fmt.Errorf("parse duration %q: %w", raw, err)

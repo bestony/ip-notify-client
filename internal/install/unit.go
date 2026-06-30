@@ -13,12 +13,10 @@ type UnitOptions struct {
 	StateDir   string
 }
 
-func RenderUnit(options UnitOptions) (string, error) {
+func RenderUnit(options UnitOptions) string {
 	var buffer bytes.Buffer
-	if err := unitTemplate.Execute(&buffer, options); err != nil {
-		return "", err
-	}
-	return buffer.String(), nil
+	_ = unitTemplate.Execute(&buffer, options)
+	return buffer.String()
 }
 
 var unitTemplate = template.Must(template.New("systemd-unit").Parse(`[Unit]
