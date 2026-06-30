@@ -7,6 +7,60 @@ Supported notification providers:
 - Bark API V2
 - Pushover Message API
 
+## Quick install
+
+Install the latest Linux release without installing Go:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bestony/ip-notify-client/main/scripts/install.sh | bash
+```
+
+The installer supports Linux with systemd on `amd64` and `arm64`. It downloads the matching GitHub Release tarball, verifies it with `SHA256SUMS`, installs the binary to `/usr/local/bin/ip-notify`, writes `/etc/ip-notify/config.yaml` when credentials are available, and restarts `ip-notify.service` after a successful config check.
+
+To run the local script instead:
+
+```sh
+BARK_DEVICE_KEYS=your-device-key IP_NOTIFY_PROVIDER=bark bash scripts/install.sh --version v0.1.0
+```
+
+Non-interactive Bark setup:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bestony/ip-notify-client/main/scripts/install.sh | \
+  IP_NOTIFY_PROVIDER=bark \
+  BARK_DEVICE_KEYS=your-device-key,another-device-key \
+  BARK_SERVER_URL=https://api.day.app \
+  BARK_GROUP=ip-notify \
+  bash
+```
+
+Non-interactive Pushover setup:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bestony/ip-notify-client/main/scripts/install.sh | \
+  IP_NOTIFY_PROVIDER=pushover \
+  PUSHOVER_TOKEN=your-application-token \
+  PUSHOVER_USER=your-user-key \
+  PUSHOVER_DEVICE=optional-device \
+  bash
+```
+
+Useful options:
+
+```sh
+bash scripts/install.sh --version v0.1.0 --config /etc/ip-notify/config.yaml --install-path /usr/local/bin/ip-notify
+bash scripts/install.sh --dry-run
+bash scripts/install.sh --no-start
+bash scripts/install.sh --force-config
+```
+
+After installation:
+
+```sh
+systemctl status ip-notify.service
+journalctl -u ip-notify.service -f
+```
+
 ## Build
 
 ```sh
