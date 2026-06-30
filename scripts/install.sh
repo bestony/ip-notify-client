@@ -16,9 +16,11 @@ install_path="${IP_NOTIFY_INSTALL_PATH:-${DEFAULT_INSTALL_PATH}}"
 dry_run=false
 start_service=true
 force_config=false
+update_mode=false
 config_preexisting=false
 config_reused=false
 config_validated=false
+service_restarted=false
 validation_failure_reason=""
 prompt_answer=""
 
@@ -57,9 +59,14 @@ Flags:
   --config <path>          Config file path. Defaults to /etc/ip-notify/config.yaml.
   --install-path <path>    Binary install path. Defaults to /usr/local/bin/ip-notify.
   --dry-run                Print planned actions without downloading or changing the system.
-  --no-start               Install and configure without restarting ip-notify.service.
+  --no-start               Install/update without restarting ip-notify.service.
   --force-config           Back up and overwrite an existing config file.
   --help                   Show this help.
+
+If --install-path points to an existing executable ip-notify binary, the installer
+runs in update mode: it downloads, verifies, extracts, and replaces the binary
+only. Update mode does not prompt for provider settings, write config, run
+install-daemon, or validate first-time config.
 
 Environment:
   IP_NOTIFY_VERSION        Same as --version.
@@ -219,6 +226,24 @@ run_privileged() {
     "$@"
   else
     sudo "$@"
+  fi
+}
+
+installed_binary_exists() {
+  if [[ "${dry_run}" == "true" ]]; then
+    test -x "${install_path}"
+    return
+  fi
+  run_privileged test -x "${install_path}" >/dev/null 2>&1
+}
+
+detect_installation_mode() {
+  if installed_binary_exists; then
+    update_mode=true
+    log "Mode: update (existing executable detected at ${install_path})"
+  else
+    update_mode=false
+    log "Mode: install (no executable detected at ${install_path})"
   fi
 }
 
@@ -519,6 +544,7 @@ download_and_verify() {
     log "Would download ${archive_url}"
     log "Would download ${sums_url}"
     log "Would verify ${archive_name} with SHA256SUMS"
+    log "Would extract ${archive_name}"
     return 0
   fi
 
@@ -534,6 +560,16 @@ download_and_verify() {
   log "Extracting release archive"
   tar -xzf "${tmp_dir}/${archive_name}" -C "${tmp_dir}"
   [[ -x "${tmp_dir}/ip-notify" ]] || fail "release archive does not contain an executable ip-notify binary"
+}
+
+replace_installed_binary() {
+  if [[ "${dry_run}" == "true" ]]; then
+    log "Would replace ${install_path} with ${tmp_dir:-<temp>}/ip-notify"
+    return 0
+  fi
+
+  log "Replacing ${install_path}"
+  run_privileged install -m 0755 "${tmp_dir}/ip-notify" "${install_path}"
 }
 
 install_daemon() {
@@ -592,16 +628,59 @@ restart_service() {
   run_privileged systemctl restart "${SERVICE_NAME}"
 }
 
+restart_service_after_update() {
+  if [[ "${start_service}" != "true" ]]; then
+    if [[ "${dry_run}" == "true" ]]; then
+      log "Service restart disabled by --no-start"
+    else
+      log "Skipping service restart because --no-start was set"
+    fi
+    return 0
+  fi
+
+  if [[ "${dry_run}" == "true" ]]; then
+    log "Would restart ${SERVICE_NAME} only if it is currently active"
+    return 0
+  fi
+
+  if run_privileged systemctl is-active --quiet "${SERVICE_NAME}"; then
+    log "Restarting active ${SERVICE_NAME}"
+    run_privileged systemctl restart "${SERVICE_NAME}"
+    service_restarted=true
+  else
+    log "${SERVICE_NAME} is not active; skipping restart"
+  fi
+}
+
+update_installed_binary() {
+  download_and_verify "$1"
+  replace_installed_binary
+  restart_service_after_update
+}
+
 print_summary() {
   if [[ "${dry_run}" == "true" ]]; then
-    log "Dry run complete for ${REPO} ${version}"
+    if [[ "${update_mode}" == "true" ]]; then
+      log "Dry run complete for updating ${REPO} ${version}"
+    else
+      log "Dry run complete for installing ${REPO} ${version}"
+    fi
+  elif [[ "${update_mode}" == "true" ]]; then
+    log "Updated ${REPO} ${version}"
   else
     log "Installed ${REPO} ${version}"
   fi
   log "Binary: ${install_path}"
-  log "Config: ${config_path}"
+  if [[ "${update_mode}" == "true" ]]; then
+    log "Config: unchanged"
+  else
+    log "Config: ${config_path}"
+  fi
   log "Service: ${SERVICE_NAME}"
   if [[ "${start_service}" == "true" && "${dry_run}" != "true" && "${config_validated}" == "true" ]]; then
+    log "Check status with: systemctl status ${SERVICE_NAME}"
+    log "Watch logs with: journalctl -u ${SERVICE_NAME} -f"
+  elif [[ "${start_service}" == "true" && "${dry_run}" != "true" && "${service_restarted}" == "true" ]]; then
     log "Check status with: systemctl status ${SERVICE_NAME}"
     log "Watch logs with: journalctl -u ${SERVICE_NAME} -f"
   fi
@@ -609,21 +688,34 @@ print_summary() {
 
 main() {
   parse_args "$@"
-  normalize_provider
   require_linux_systemd
   require_commands
   ensure_privilege_available
-  detect_preexisting_config
-  prompt_if_missing
-  normalize_provider
   local arch
   arch="$(map_arch)"
   resolve_latest_version
+  detect_installation_mode
 
   log "Version: ${version}"
   log "Architecture: ${arch}"
-  log "Config path: ${config_path}"
   log "Install path: ${install_path}"
+  if [[ "${dry_run}" == "true" ]]; then
+    log "Dry run enabled; no changes will be made"
+  fi
+
+  if [[ "${update_mode}" == "true" ]]; then
+    log "Updating binary only; config, provider settings, and daemon files will not be changed"
+    update_installed_binary "${arch}"
+    print_summary
+    return 0
+  fi
+
+  normalize_provider
+  detect_preexisting_config
+  prompt_if_missing
+  normalize_provider
+
+  log "Config path: ${config_path}"
   if [[ -n "${provider}" ]]; then
     log "Provider: ${provider}"
   else
@@ -631,10 +723,6 @@ main() {
   fi
   if [[ "${config_preexisting}" == "true" && "${force_config}" != "true" ]]; then
     log "Existing config detected; it will not be overwritten without --force-config"
-  fi
-
-  if [[ "${dry_run}" == "true" ]]; then
-    log "Dry run enabled; no changes will be made"
   fi
 
   download_and_verify "${arch}"

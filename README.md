@@ -17,6 +17,8 @@ curl -fsSL https://raw.githubusercontent.com/bestony/ip-notify-client/main/scrip
 
 The installer supports Linux with systemd on `amd64` and `arm64`. It downloads the matching GitHub Release tarball, verifies it with `SHA256SUMS`, installs the binary to `/usr/local/bin/ip-notify`, writes `/etc/ip-notify/config.yaml` when credentials are available, and restarts `ip-notify.service` after a successful config check.
 
+When the target `--install-path` already contains an executable `ip-notify` binary, running the installer again switches to update mode. Update mode only downloads, verifies, extracts, and replaces the binary. It does not prompt for provider settings, write config, run `install-daemon`, or validate first-time config. By default it restarts `ip-notify.service` only when the service is already active; pass `--no-start` to replace the binary without restart handling.
+
 To run the local script instead:
 
 ```sh
