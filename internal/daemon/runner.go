@@ -166,7 +166,10 @@ func (r Runner) ProcessOnceResult(ctx context.Context) (ProcessResult, error) {
 
 	message := notify.Message{
 		Title: notificationTitle(),
-		Body:  snapshot.Body(),
+		Body: snapshot.BodyWithOptions(ipdetect.BodyOptions{
+			IncludePublic:  r.Config.Check.IncludePublic,
+			IncludePrivate: r.Config.Check.IncludePrivate,
+		}),
 	}
 	for _, notifier := range r.Notifiers {
 		name := notifier.Name()

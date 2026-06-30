@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -293,6 +294,78 @@ func TestRunnerPassesDetectionOptions(t *testing.T) {
 		detector.options.InterfaceExcludePrefixes[0] != "docker" ||
 		detector.options.InterfaceExcludePrefixes[1] != "br" {
 		t.Fatalf("unexpected interface exclude prefixes: %#v", detector.options.InterfaceExcludePrefixes)
+	}
+}
+
+func TestRunnerNotificationBodyOmitsDisabledPublicIP(t *testing.T) {
+	cfg := config.Default()
+	cfg.Check.NotifyInitial = true
+	cfg.Check.IncludePublic = false
+	cfg.Check.IncludePrivate = true
+	notifier := &fakeNotifier{name: "bark"}
+	runner := Runner{
+		Config: cfg,
+		Detector: &fakeDetector{
+			snapshot: ipdetect.Snapshot{
+				PublicIP: "203.0.113.4",
+				InterfaceIPs: []ipdetect.InterfaceIP{
+					{Interface: "eth0", IP: "192.0.2.10"},
+				},
+			},
+		},
+		Store:     &memoryStore{state: state.NewState()},
+		Notifiers: []notify.Notifier{notifier},
+		Now:       func() time.Time { return time.Unix(100, 0).UTC() },
+	}
+
+	if err := runner.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if len(notifier.messages) != 1 {
+		t.Fatalf("expected one notification message, got %#v", notifier.messages)
+	}
+	body := notifier.messages[0].Body
+	if strings.Contains(body, "Public IP") {
+		t.Fatalf("expected public IP section to be omitted, got:\n%s", body)
+	}
+	if !strings.Contains(body, "Interface IPs:\n- eth0: 192.0.2.10") {
+		t.Fatalf("expected interface IPs section, got:\n%s", body)
+	}
+}
+
+func TestRunnerNotificationBodyOmitsDisabledInterfaceIPs(t *testing.T) {
+	cfg := config.Default()
+	cfg.Check.NotifyInitial = true
+	cfg.Check.IncludePublic = true
+	cfg.Check.IncludePrivate = false
+	notifier := &fakeNotifier{name: "bark"}
+	runner := Runner{
+		Config: cfg,
+		Detector: &fakeDetector{
+			snapshot: ipdetect.Snapshot{
+				PublicIP: "203.0.113.4",
+				InterfaceIPs: []ipdetect.InterfaceIP{
+					{Interface: "eth0", IP: "192.0.2.10"},
+				},
+			},
+		},
+		Store:     &memoryStore{state: state.NewState()},
+		Notifiers: []notify.Notifier{notifier},
+		Now:       func() time.Time { return time.Unix(100, 0).UTC() },
+	}
+
+	if err := runner.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if len(notifier.messages) != 1 {
+		t.Fatalf("expected one notification message, got %#v", notifier.messages)
+	}
+	body := notifier.messages[0].Body
+	if strings.Contains(body, "Interface IPs") {
+		t.Fatalf("expected interface IPs section to be omitted, got:\n%s", body)
+	}
+	if !strings.Contains(body, "Public IP: 203.0.113.4") {
+		t.Fatalf("expected public IP section, got:\n%s", body)
 	}
 }
 

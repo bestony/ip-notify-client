@@ -49,9 +49,97 @@ func TestSnapshotBody(t *testing.T) {
 	}
 }
 
+func TestSnapshotBodyWithOptions(t *testing.T) {
+	snapshot := Snapshot{
+		PublicIP: "203.0.113.5",
+		InterfaceIPs: []InterfaceIP{
+			{Interface: "eth0", IP: "192.168.1.2"},
+		},
+	}
+	tests := []struct {
+		name    string
+		options BodyOptions
+		want    string
+	}{
+		{
+			name: "includes public and private",
+			options: BodyOptions{
+				IncludePublic:  true,
+				IncludePrivate: true,
+			},
+			want: "Public IP: 203.0.113.5\nInterface IPs:\n- eth0: 192.168.1.2",
+		},
+		{
+			name: "omits public when disabled",
+			options: BodyOptions{
+				IncludePublic:  false,
+				IncludePrivate: true,
+			},
+			want: "Interface IPs:\n- eth0: 192.168.1.2",
+		},
+		{
+			name: "omits private when disabled",
+			options: BodyOptions{
+				IncludePublic:  true,
+				IncludePrivate: false,
+			},
+			want: "Public IP: 203.0.113.5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := snapshot.BodyWithOptions(tt.options); got != tt.want {
+				t.Fatalf("unexpected body:\n%s", got)
+			}
+		})
+	}
+}
+
 func TestSnapshotBodyWithoutAddresses(t *testing.T) {
 	body := Snapshot{}.Body()
 	if body != "Public IP: unavailable\nInterface IPs: none" {
 		t.Fatalf("unexpected empty body:\n%s", body)
+	}
+}
+
+func TestSnapshotBodyWithOptionsWithoutAddresses(t *testing.T) {
+	tests := []struct {
+		name    string
+		options BodyOptions
+		want    string
+	}{
+		{
+			name: "includes public fallback",
+			options: BodyOptions{
+				IncludePublic:  true,
+				IncludePrivate: false,
+			},
+			want: "Public IP: unavailable",
+		},
+		{
+			name: "includes private fallback",
+			options: BodyOptions{
+				IncludePublic:  false,
+				IncludePrivate: true,
+			},
+			want: "Interface IPs: none",
+		},
+		{
+			name: "includes both fallbacks",
+			options: BodyOptions{
+				IncludePublic:  true,
+				IncludePrivate: true,
+			},
+			want: "Public IP: unavailable\nInterface IPs: none",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (Snapshot{}).BodyWithOptions(tt.options); got != tt.want {
+				t.Fatalf("unexpected empty body:\n%s", got)
+			}
+		})
 	}
 }

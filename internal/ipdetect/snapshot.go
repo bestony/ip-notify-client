@@ -20,6 +20,11 @@ type InterfaceIP struct {
 	IP        string `json:"ip"`
 }
 
+type BodyOptions struct {
+	IncludePublic  bool
+	IncludePrivate bool
+}
+
 func (s Snapshot) Normalize() Snapshot {
 	normalized := Snapshot{
 		InterfaceIPs: make([]InterfaceIP, 0, len(s.InterfaceIPs)),
@@ -69,23 +74,37 @@ func (s Snapshot) Hash() string {
 }
 
 func (s Snapshot) Body() string {
+	return s.BodyWithOptions(BodyOptions{
+		IncludePublic:  true,
+		IncludePrivate: true,
+	})
+}
+
+func (s Snapshot) BodyWithOptions(options BodyOptions) string {
 	normalized := s.Normalize()
 	var builder strings.Builder
 
-	if normalized.PublicIP != "" {
-		fmt.Fprintf(&builder, "Public IP: %s", normalized.PublicIP)
-	} else {
-		builder.WriteString("Public IP: unavailable")
+	if options.IncludePublic {
+		if normalized.PublicIP != "" {
+			fmt.Fprintf(&builder, "Public IP: %s", normalized.PublicIP)
+		} else {
+			builder.WriteString("Public IP: unavailable")
+		}
 	}
 
-	if len(normalized.InterfaceIPs) == 0 {
-		builder.WriteString("\nInterface IPs: none")
-		return builder.String()
-	}
+	if options.IncludePrivate {
+		if builder.Len() > 0 {
+			builder.WriteByte('\n')
+		}
+		if len(normalized.InterfaceIPs) == 0 {
+			builder.WriteString("Interface IPs: none")
+			return builder.String()
+		}
 
-	builder.WriteString("\nInterface IPs:")
-	for _, item := range normalized.InterfaceIPs {
-		fmt.Fprintf(&builder, "\n- %s: %s", item.Interface, item.IP)
+		builder.WriteString("Interface IPs:")
+		for _, item := range normalized.InterfaceIPs {
+			fmt.Fprintf(&builder, "\n- %s: %s", item.Interface, item.IP)
+		}
 	}
 	return builder.String()
 }
