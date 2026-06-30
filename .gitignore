@@ -1,0 +1,8 @@
+/ip-notify
+/dist/
+*.test
+*.out
+.env
+.env.*
+!.env.example
+.gitlock

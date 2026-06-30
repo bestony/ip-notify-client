@@ -1,0 +1,29 @@
+log:
+  level: info
+
+check:
+  interval: 10m
+  timeout: 5s
+  notify_initial: true
+  public_sources:
+    - https://api.ipify.org
+    - https://ifconfig.me/ip
+    - https://icanhazip.com
+  include_private: true
+  interface_allowlist: []
+
+state:
+  path: /var/lib/ip-notify/state.json
+
+notifiers:
+  bark:
+    enabled: false
+    server_url: https://api.day.app
+    device_keys: []
+    group: ip-notify
+
+  pushover:
+    enabled: false
+    token: ""
+    user: ""
+    device: ""
